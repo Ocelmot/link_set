@@ -1,0 +1,24 @@
+[package]
+name = "link_set"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+serde = ["dep:serde", "dep:bincode"]
+
+[dependencies]
+thiserror = "2.0.17"
+
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1.16"
+futures = "0.3.31"
+tracing = "0.1"
+
+rand = "0.8.5"
+
+serde = {version = "1.0.228", optional = true}
+bincode = {version = "2.0.1", optional = true, features = ["serde"]}
+
+
+[dev-dependencies]
+test-log = {version = "0.2", features = ["trace"]}
