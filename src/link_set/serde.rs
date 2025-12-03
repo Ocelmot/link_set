@@ -46,7 +46,7 @@ impl From<DecodeError> for SerdeError {
 
 impl<S> LinkSetSendable for S
 where
-    S: serde::Serialize + serde::de::DeserializeOwned + Send + Sync + 'static,
+    S: serde::Serialize + serde::de::DeserializeOwned + std::fmt::Debug + Send + Sync + 'static,
 {
     type E = SerdeError;
     fn to_bytes(self) -> Result<Vec<u8>, SerdeError> {

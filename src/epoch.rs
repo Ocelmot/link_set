@@ -6,7 +6,7 @@ use rand::random;
 pub struct Epoch(NonZero<u64>);
 
 impl Epoch {
-    pub(crate) const ONE: Epoch = Epoch(NonZero::new(1).unwrap());
+    pub const ONE: Epoch = Epoch(NonZero::new(1).unwrap());
 
     pub(crate) fn from_int(value: u64) -> Option<Self> {
         NonZero::new(value).map(|x| Epoch(x))
@@ -16,7 +16,7 @@ impl Epoch {
         self.0.into()
     }
 
-    pub(crate) fn random() -> Epoch {
+    pub fn random() -> Epoch {
         let mut int: u64 = random();
         if int == 0 {
             int += 1;

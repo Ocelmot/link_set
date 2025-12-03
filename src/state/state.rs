@@ -5,7 +5,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    LinkResult,
+    LinkSetResult,
     deadline::Deadline,
     link_set::controller::{LinkSetControl, LinkSetControlCommand, LinkSetControlConfig, LinkSetMessageInner},
     links::{WrappedLink, link::PinnedLink},
@@ -57,7 +57,7 @@ impl CommonState {
         }
     }
 
-    pub(crate) fn wrap_link(&mut self, link: Box<dyn PinnedLink>) -> LinkResult<WrappedLink> {
+    pub(crate) fn wrap_link(&mut self, link: Box<dyn PinnedLink>) -> LinkSetResult<WrappedLink> {
         let id = self.next_link_id;
         self.next_link_id = self.next_link_id + 1;
         let mut wrapped = WrappedLink::new(link, id);

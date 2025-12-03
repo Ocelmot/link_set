@@ -59,45 +59,45 @@ impl SliceManager {
             .copied()
     }
 
-    #[deprecated]
-    pub fn recv_protocol(&mut self, proto: &LinkProtocol) {
-        match proto {
-            LinkProtocol::Ack {
-                epoch,
-                seq,
-                last_index,
-                ..
-            } => {
-                if *epoch != self.epoch.to_int() || *seq != self.seq {
-                    return;
-                }
-                self.remove_slice(0, *last_index);
-            }
-            LinkProtocol::MsgSlice {
-                epoch,
-                seq,
-                first_index,
-                data,
-                ..
-            } => {
-                if *epoch != self.epoch.to_int() || *seq != self.seq {
-                    return;
-                }
-                // cap the last_index at the end of the data.
-                let last_index = proto.last_index().min(self.data.len() as u64 - 1);
-                if last_index < *first_index {
-                    return; // cannot add such a slice
-                }
-                let length = last_index - first_index;
+    // #[deprecated]
+    // pub fn recv_protocol(&mut self, proto: &LinkProtocol) {
+    //     match proto {
+    //         LinkProtocol::Ack {
+    //             epoch,
+    //             seq,
+    //             last_index,
+    //             ..
+    //         } => {
+    //             if *epoch != self.epoch.to_int() || *seq != self.seq {
+    //                 return;
+    //             }
+    //             self.remove_slice(0, *last_index);
+    //         }
+    //         LinkProtocol::MsgSlice {
+    //             epoch,
+    //             seq,
+    //             first_index,
+    //             data,
+    //             ..
+    //         } => {
+    //             if *epoch != self.epoch.to_int() || *seq != self.seq {
+    //                 return;
+    //             }
+    //             // cap the last_index at the end of the data.
+    //             let last_index = proto.last_index().min(self.data.len() as u64 - 1);
+    //             if last_index < *first_index {
+    //                 return; // cannot add such a slice
+    //             }
+    //             let length = last_index - first_index;
 
-                self.add_slice(*first_index, last_index);
-                let dest = &mut self.data[*first_index as usize..=last_index as usize];
-                let src = &data[..=length as usize];
-                dest.copy_from_slice(src);
-            }
-            _ => {}
-        }
-    }
+    //             self.add_slice(*first_index, last_index);
+    //             let dest = &mut self.data[*first_index as usize..=last_index as usize];
+    //             let src = &data[..=length as usize];
+    //             dest.copy_from_slice(src);
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
     pub fn recv_slice(&mut self, epoch: Epoch, seq: u64, first_index: u64, data: Vec<u8>) {
         if epoch != self.epoch || seq != self.seq {
@@ -772,50 +772,50 @@ mod tests {
         assert!(!mgr.is_full());
     }
 
-    #[test]
-    fn transfer_slices() {
-        let epoch = Epoch::from_int(4).unwrap();
-        let seq = 50;
-        let data = b"Here is some test data to be sent!";
-        let sending_mgr = SliceManager::from_vec(epoch, seq, data.to_vec());
-        let mut receiving_mgr = SliceManager::new(epoch, seq, data.len() as u64);
+    // #[test]
+    // fn transfer_slices() {
+    //     let epoch = Epoch::from_int(4).unwrap();
+    //     let seq = 50;
+    //     let data = b"Here is some test data to be sent!";
+    //     let sending_mgr = SliceManager::from_vec(epoch, seq, data.to_vec());
+    //     let mut receiving_mgr = SliceManager::new(epoch, seq, data.len() as u64);
 
-        let mut slices = sending_mgr.get_slices(3);
-        slices.shuffle(&mut thread_rng());
-        for slice in slices {
-            receiving_mgr.recv_protocol(&slice);
-        }
+    //     let mut slices = sending_mgr.get_slices(3);
+    //     slices.shuffle(&mut thread_rng());
+    //     for slice in slices {
+    //         receiving_mgr.recv_protocol(&slice);
+    //     }
 
-        let recvd_data = receiving_mgr
-            .data()
-            .expect("all data should have been sent");
-        assert_eq!(data, recvd_data);
-    }
+    //     let recvd_data = receiving_mgr
+    //         .data()
+    //         .expect("all data should have been sent");
+    //     assert_eq!(data, recvd_data);
+    // }
 
-    #[test]
-    fn transfer_slice_past_the_end() {
-        let epoch = Epoch::from_int(506).unwrap();
-        let seq = 1;
-        let data = b"Here is some test data to be sent!";
-        let sending_mgr = SliceManager::from_vec(epoch, seq, data.to_vec());
-        let mut receiving_mgr = SliceManager::new(epoch, seq, data.len() as u64);
+    // #[test]
+    // fn transfer_slice_past_the_end() {
+    //     let epoch = Epoch::from_int(506).unwrap();
+    //     let seq = 1;
+    //     let data = b"Here is some test data to be sent!";
+    //     let sending_mgr = SliceManager::from_vec(epoch, seq, data.to_vec());
+    //     let mut receiving_mgr = SliceManager::new(epoch, seq, data.len() as u64);
 
-        let slices = sending_mgr.get_slices(3);
-        for slice in slices {
-            receiving_mgr.recv_protocol(&slice);
-        }
+    //     let slices = sending_mgr.get_slices(3);
+    //     for slice in slices {
+    //         receiving_mgr.recv_protocol(&slice);
+    //     }
 
-        receiving_mgr.recv_protocol(&LinkProtocol::MsgSlice {
-            epoch: 4,
-            seq: 1,
-            seq_len: 5,
-            first_index: 34,
-            data: b"test!".to_vec(),
-        });
+    //     receiving_mgr.recv_protocol(&LinkProtocol::MsgSlice {
+    //         epoch: 4,
+    //         seq: 1,
+    //         seq_len: 5,
+    //         first_index: 34,
+    //         data: b"test!".to_vec(),
+    //     });
 
-        let recvd_data = receiving_mgr
-            .data()
-            .expect("all data should have been sent");
-        assert_eq!(data, recvd_data);
-    }
+    //     let recvd_data = receiving_mgr
+    //         .data()
+    //         .expect("all data should have been sent");
+    //     assert_eq!(data, recvd_data);
+    // }
 }

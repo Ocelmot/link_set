@@ -7,7 +7,7 @@ use tokio::{
 use tracing::{Instrument, info, trace, trace_span};
 
 use crate::{
-    LinkResult,
+    LinkSetResult,
     link_set::controller::{LinkSetControl, LinkSetMessageInner},
     state::state::CoreState,
 };
@@ -67,7 +67,7 @@ pub(crate) fn start_core() -> (Sender<LinkSetControl>, Receiver<LinkSetMessageIn
             }
 
             #[allow(unreachable_code)]
-            LinkResult::Ok(())
+            LinkSetResult::Ok(())
         }
         .instrument(span),
     );

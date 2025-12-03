@@ -7,7 +7,7 @@ use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::trace;
 
-use crate::{LinkResult, links::link::PinnedLink, protocol::LinkProtocol};
+use crate::{LinkSetResult, links::link::PinnedLink, protocol::LinkProtocol};
 
 /// The last N historical samples to keep when calculating latency
 static HISTORY_LEN: usize = 6;
@@ -47,14 +47,14 @@ impl WrappedLink {
         self.id
     }
 
-    pub async fn send_ping(&mut self) -> LinkResult {
+    pub async fn send_ping(&mut self) -> LinkSetResult {
         // end the previous ping if there was one.
         self.end_ping();
         self.ping = Some(Instant::now());
         self.link.send(LinkProtocol::Ping).await
     }
 
-    pub async fn send_pong(&mut self) -> LinkResult {
+    pub async fn send_pong(&mut self) -> LinkSetResult {
         self.link.send(LinkProtocol::Pong).await
     }
 
@@ -78,7 +78,7 @@ impl WrappedLink {
         self.recent.iter().sum::<Duration>() / self.recent.len() as u32
     }
 
-    pub fn take_reader(&mut self) -> LinkResult<ReceiverStream<(u64, LinkProtocol)>> {
+    pub fn take_reader(&mut self) -> LinkSetResult<ReceiverStream<(u64, LinkProtocol)>> {
         let mut reader = self.link.take_reader()?;
         let (tx, rx) = channel(10);
         let id = self.id;
@@ -97,11 +97,11 @@ impl WrappedLink {
         Ok(x)
     }
 
-    pub(crate) async fn send(&mut self, msg: LinkProtocol) -> LinkResult {
+    pub(crate) async fn send(&mut self, msg: LinkProtocol) -> LinkSetResult {
         self.link.send(msg).await
     }
 
-    pub(crate) async fn recv(&mut self) -> LinkResult<LinkProtocol> {
+    pub(crate) async fn recv(&mut self) -> LinkSetResult<LinkProtocol> {
         self.link.recv().await
     }
 

@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, fmt::Debug, io::Read};
 
 use crate::{
-    LinkError, LinkResult,
+    LinkSetError, LinkSetResult,
     epoch::{Epoch, opt_epoch_to_int},
 };
 
@@ -151,20 +151,20 @@ impl LinkProtocol {
         }
     }
 
-    pub fn deserialize(data: &mut VecDeque<u8>) -> LinkResult<Self> {
+    pub fn deserialize(data: &mut VecDeque<u8>) -> LinkSetResult<Self> {
         // Deserialize variant
-        let variant = data.pop_front().ok_or(LinkError::DeserializeEOF)?;
+        let variant = data.pop_front().ok_or(LinkSetError::DeserializeEOF)?;
 
         match variant {
             0 => {
                 // Deserialize epoch
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let epoch = u64::from_be_bytes(buf);
 
                 // Deserialize reply
-                let reply = data.pop_front().ok_or(LinkError::DeserializeEOF)? != 0;
+                let reply = data.pop_front().ok_or(LinkSetError::DeserializeEOF)? != 0;
                 Ok(LinkProtocol::Reset {
                     epoch: Epoch::from_int(epoch),
                     request: reply,
@@ -174,25 +174,25 @@ impl LinkProtocol {
                 // Deserialize epoch
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let epoch = u64::from_be_bytes(buf);
 
                 // Deserialize seq number
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let seq = u64::from_be_bytes(buf);
 
                 // Deserialize last index
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let last_index = u64::from_be_bytes(buf);
 
                 Ok(LinkProtocol::Ack {
@@ -205,57 +205,57 @@ impl LinkProtocol {
                 // Deserialize epoch
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let epoch = u64::from_be_bytes(buf);
 
                 // Deserialize seq number
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let seq = u64::from_be_bytes(buf);
 
                 // Deserialize total length of the slice
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let seq_len = u64::from_be_bytes(buf);
 
                 // Deserialize the index of the first byte in the slice
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let first_index = u64::from_be_bytes(buf);
 
                 // Deserialize offset
                 if data.len() < 8 {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
                 let mut buf = [0u8; 8];
                 data.read_exact(&mut buf)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
                 let data_len = u64::from_be_bytes(buf);
 
                 // Deserialize data
                 if data_len == 0 {
-                    return Err(LinkError::DeserializeInvalidLen);
+                    return Err(LinkSetError::DeserializeInvalidLen);
                 }
                 if data.len() < data_len as usize {
-                    return Err(LinkError::DeserializeEOF);
+                    return Err(LinkSetError::DeserializeEOF);
                 }
 
                 let mut read_data = Vec::with_capacity(data_len as usize);
                 data.take(data_len)
                     .read_to_end(&mut read_data)
-                    .map_err(|_| LinkError::DeserializeEOF)?;
+                    .map_err(|_| LinkSetError::DeserializeEOF)?;
 
                 Ok(LinkProtocol::MsgSlice {
                     epoch,
@@ -267,7 +267,7 @@ impl LinkProtocol {
             }
             3 => Ok(LinkProtocol::Ping),
             4 => Ok(LinkProtocol::Pong),
-            _ => Err(LinkError::DeserializeInvalid(variant)),
+            _ => Err(LinkSetError::DeserializeInvalid(variant)),
         }
     }
 }

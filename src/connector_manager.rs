@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::link_set::controller::{LinkSetControl, LinkSetControlCommand};
 use crate::links::connector::PinnedLinkConnector;
-use crate::{LinkError, LinkResult};
+use crate::{LinkSetError, LinkSetResult};
 
 enum ConnectorManagerControl {
     AddAddr(String),
@@ -88,12 +88,12 @@ impl ConnectorManager {
 
     pub async fn cancel(
         self,
-    ) -> LinkResult<(Vec<Box<dyn PinnedLinkConnector>>, Vec<(String, bool)>)> {
+    ) -> LinkSetResult<(Vec<Box<dyn PinnedLinkConnector>>, Vec<(String, bool)>)> {
         drop(self.tx);
         let _ = self.stop_tx.send(());
         self.handle
             .await
-            .map_err(|e| LinkError::TaskTerminated(Box::new(e)))
+            .map_err(|e| LinkSetError::TaskTerminated(Box::new(e)))
     }
 }
 

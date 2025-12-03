@@ -57,7 +57,7 @@ async fn create_default_config(
     tokio::spawn(async move {
         while let Some(link) = listener1.recv().await {
             trace!("Link a got link from listener");
-            let _ = link_set1_sender.add_link(link).await;
+            let _ = link_set1_sender.add_link(Box::new(link)).await;
         }
     });
 
@@ -68,7 +68,7 @@ async fn create_default_config(
             .add_connector(move |addr: String| {
                 trace!("Link a is connecting");
                 let mut hub_clone = hub1.clone();
-                async move { hub_clone.connect(&addr).ok_or(link_set::LinkError::Closed) }
+                async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
             })
             .await
             .expect("link should stay alive long enough to add the connector");
@@ -84,7 +84,7 @@ async fn create_default_config(
     tokio::spawn(async move {
         while let Some(link) = listener2.recv().await {
             trace!("Link b got link from listener");
-            let _ = link_set2_sender.add_link(link).await;
+            let _ = link_set2_sender.add_link(Box::new(link)).await;
         }
     });
 
@@ -95,7 +95,7 @@ async fn create_default_config(
             .add_connector(move |addr: String| {
                 trace!("Link b is connecting");
                 let mut hub_clone = hub2.clone();
-                async move { hub_clone.connect(&addr).ok_or(link_set::LinkError::Closed) }
+                async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
             })
             .await
             .expect("link should stay alive long enough to add the connector");
@@ -115,7 +115,7 @@ async fn pipe_link_set_send_recv() {
     let link = hub
         .connect(SIDE_2_ADDR)
         .expect("Failed to get connection from hub");
-    a.add_link(link).await.unwrap();
+    a.add_link(Box::new(link)).await.unwrap();
 
     // both sides should emit connected
     let LinkSetMessage::Connected(_e) = a.recv().await.unwrap() else {
@@ -148,7 +148,7 @@ async fn pipe_link_set_connection_lost() {
         .connect(SIDE_2_ADDR)
         .expect("Failed to get connection from hub");
     let canceler = link.get_canceler();
-    a.add_link(link).await.unwrap();
+    a.add_link(Box::new(link)).await.unwrap();
 
     // both sides should emit connected
     let LinkSetMessage::Connected(_e) = a.recv().await.unwrap() else {

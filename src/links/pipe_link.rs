@@ -6,6 +6,7 @@ use std::{
 };
 
 use rand::{distributions::Bernoulli, prelude::Distribution, thread_rng};
+use thiserror::Error;
 use tokio::{
     select,
     sync::mpsc::{Receiver, Sender, channel, error::TrySendError},
@@ -14,7 +15,6 @@ use tokio::{
 use tracing::{debug, trace};
 
 use crate::{
-    LinkError, LinkResult,
     deadline::Deadline,
     links::link::{Link, LinkReader},
     protocol::LinkProtocol,
@@ -140,14 +140,9 @@ pub struct PipeLink {
     id: u32,
     tx: Sender<(LinkProtocol, Instant)>,
     reader: Option<PipeLinkReader>,
-    // rx: Option<Receiver<(LinkProtocol, Instant)>>,
-    // peeked: Option<(LinkProtocol, Instant)>,
     max_size: u32,
-    // cancel_rx: Option<Receiver<()>>,
     canceler: PipeLinkCanceler,
     reliability: Bernoulli,
-    // expiration: Deadline,
-    // latency: Option<Duration>,
 }
 
 impl PipeLink {
@@ -204,8 +199,20 @@ impl PipeLink {
     }
 }
 
+pub type PipeLinkResult<T=()> =  Result<T, PipeLinkError>;
+
+#[derive(Debug, Error)]
+pub enum PipeLinkError {
+    #[error("The receiver hs already been taken")]
+    ReceiverTaken,
+
+    #[error("The link has closed")]
+    Closed
+}
+
 impl Link for PipeLink {
-    async fn send(&mut self, msg: LinkProtocol) -> LinkResult {
+    #[allow(refining_impl_trait)]
+    async fn send(&mut self, msg: LinkProtocol) -> Result<(), PipeLinkError> {
         let reliability_success = {
             let mut rng = thread_rng();
             self.reliability.sample(&mut rng)
@@ -216,20 +223,21 @@ impl Link for PipeLink {
             self.tx
                 .send((msg, Instant::now()))
                 .await
-                .map_err(|_| LinkError::Closed)?;
+                .map_err(|_| PipeLinkError::Closed)?;
         } else {
             debug!("Pipe {}: send (dropped) msg {:?}", self.id, msg);
         }
         Ok(())
     }
 
-    async fn recv(&mut self) -> LinkResult<LinkProtocol> {
-        let reader = self.reader.as_mut().ok_or(LinkError::ReceiverTaken)?;
+    #[allow(refining_impl_trait)]
+    async fn recv(&mut self) -> PipeLinkResult<LinkProtocol> {
+        let reader = self.reader.as_mut().ok_or(PipeLinkError::ReceiverTaken)?;
         reader.read().await
     }
 
-    fn take_reader(&mut self) -> LinkResult<impl LinkReader + 'static> {
-        self.reader.take().ok_or(LinkError::ReceiverTaken)
+    fn take_reader(&mut self) -> Result<impl LinkReader + 'static, impl std::error::Error + std::marker::Send + Sync + 'static> {
+        self.reader.take().ok_or(PipeLinkError::Closed)
     }
 
     fn max_size(&self) -> u32 {
@@ -262,7 +270,7 @@ impl PipeLinkCanceler {
     }
 }
 
-struct PipeLinkReader {
+pub struct PipeLinkReader {
     id: u32,
     rx: Receiver<(LinkProtocol, Instant)>,
     peeked: Option<(LinkProtocol, Instant)>,
@@ -271,7 +279,8 @@ struct PipeLinkReader {
     cancel_rx: Receiver<()>,
 }
 impl LinkReader for PipeLinkReader {
-    async fn read(&mut self) -> LinkResult<LinkProtocol> {
+    #[allow(refining_impl_trait)]
+    async fn read(&mut self) -> PipeLinkResult<LinkProtocol> {
         if let Some((msg, timestamp)) = &self.peeked {
             if let Some(latency) = self.latency {
                 sleep_until(*timestamp + latency).await;
@@ -281,7 +290,7 @@ impl LinkReader for PipeLinkReader {
             if self.expiration.is_elapsed() {
                 debug!("Pipe {}: expired", self.id);
                 self.rx.close();
-                return Err(LinkError::Terminated);
+                return Err(PipeLinkError::Closed);
             } else {
                 debug!("Pipe {}: read msg {:?}", self.id, msg);
                 return Ok(msg);
@@ -293,15 +302,15 @@ impl LinkReader for PipeLinkReader {
             _ = self.cancel_rx.recv() => {
                 debug!("Pipe {}: canceled", self.id);
                 self.rx.close();
-                return Err(LinkError::Terminated)
+                return Err(PipeLinkError::Closed)
             }
             _ = &mut self.expiration, if self.expiration.has_deadline() => {
                 debug!("Pipe {}: expired", self.id);
                 self.rx.close();
-                return Err(LinkError::Terminated)
+                return Err(PipeLinkError::Closed)
             }
             msg = self.rx.recv() => {
-                let (msg, timestamp) = msg.ok_or(LinkError::Closed)?;
+                let (msg, timestamp) = msg.ok_or(PipeLinkError::Closed)?;
                 self.peeked = Some((msg.clone(), timestamp));
                 if let Some(latency) = self.latency {
                     sleep_until(timestamp + latency).await;
@@ -407,7 +416,7 @@ mod tests {
     use tokio::time::sleep;
     use tracing::trace;
 
-    use crate::links::link::PinnedLink;
+    use crate::{LinkSetError, links::link::PinnedLink};
 
     use super::*;
 
@@ -437,7 +446,7 @@ mod tests {
 
         // test that it was not received
         let recvd_msg = PinnedLink::recv(&mut b).await;
-        if let Err(LinkError::Terminated) = recvd_msg {
+        if let Err(LinkSetError::Terminated) = recvd_msg {
         } else {
             panic!("Link should expire");
         }
@@ -533,7 +542,7 @@ mod tests {
             .expect("should be able to send");
 
         let recvd_msg = PinnedLink::recv(&mut b).await;
-        if let Err(LinkError::Terminated) = recvd_msg {
+        if let Err(LinkSetError::Terminated) = recvd_msg {
         } else {
             panic!("Link should expire");
         }

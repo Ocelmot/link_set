@@ -1,5 +1,5 @@
 use crate::{
-    LinkError, LinkResult,
+    LinkSetError, LinkSetResult,
     epoch::Epoch,
     links::{WrappedLink, wrapped_link::MAX_LATENCY},
     protocol::LinkProtocol,
@@ -27,7 +27,7 @@ impl LinkManager {
         self.links.is_empty()
     }
 
-    async fn send_proto(&mut self, proto: LinkProtocol) -> LinkResult {
+    async fn send_proto(&mut self, proto: LinkProtocol) -> LinkSetResult {
         loop {
             if let Some(link) = self.links.first_mut() {
                 if link.is_closed() || link.latency() > MAX_LATENCY {
@@ -38,18 +38,18 @@ impl LinkManager {
                 break link.send(proto).await;
             } else {
                 // links is empty
-                break LinkResult::Err(LinkError::Closed);
+                break LinkSetResult::Err(LinkSetError::Closed);
             }
         }
     }
 
     /// Send A reset with the associated parameters across the link
-    pub(crate) async fn reset(&mut self, epoch: Option<Epoch>, request: bool) -> LinkResult {
+    pub(crate) async fn reset(&mut self, epoch: Option<Epoch>, request: bool) -> LinkSetResult {
         let proto = LinkProtocol::Reset { epoch, request };
         self.send_proto(proto).await
     }
 
-    pub(crate) async fn ack(&mut self, epoch: Epoch, ack: (u64, u64)) -> LinkResult {
+    pub(crate) async fn ack(&mut self, epoch: Epoch, ack: (u64, u64)) -> LinkSetResult {
         let proto = LinkProtocol::Ack {
             epoch: epoch.to_int(),
             seq: ack.0,
@@ -59,7 +59,7 @@ impl LinkManager {
     }
 
     /// Get the remaining slices from the slice manager, and send them across the link
-    pub async fn send_slices(&mut self, slice_mgr: &SliceManager) -> LinkResult {
+    pub async fn send_slices(&mut self, slice_mgr: &SliceManager) -> LinkSetResult {
         loop {
             if let Some(link) = self.links.first_mut() {
                 if link.is_closed() || link.latency() > MAX_LATENCY {
@@ -74,7 +74,7 @@ impl LinkManager {
                 break Ok(());
             } else {
                 // links is empty
-                break LinkResult::Err(LinkError::Closed);
+                break LinkSetResult::Err(LinkSetError::Closed);
             }
         }
     }

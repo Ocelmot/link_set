@@ -3,10 +3,10 @@ use std::error::Error;
 use thiserror::Error;
 
 /// A [Result] from the link_set crate
-pub type LinkResult<T = ()> = Result<T, LinkError>;
+pub type LinkSetResult<T = ()> = Result<T, LinkSetError>;
 
 #[derive(Error, Debug)]
-pub enum LinkError {
+pub enum LinkSetError {
     #[error("deserialize: unexpected end of stream")]
     DeserializeEOF,
     #[error("deserialize: found invalid byte {0}")]
@@ -15,12 +15,15 @@ pub enum LinkError {
     DeserializeInvalidLen,
 
 	#[error("TaskTerminated error: {0}")]
-    TaskTerminated(#[source] Box<dyn Error + Send>),
+    TaskTerminated(#[source] Box<dyn Error + Send + Sync>),
 
     #[error("LinkSetSendable serialization error: {0}")]
-    SendableSerialization(#[source] Box<dyn Error + Send>),
+    SendableSerialization(#[source] Box<dyn Error + Send + Sync>),
     #[error("LinkSetSendable deserialization error: {0}")]
-    SendableDeserialization(#[source] Box<dyn Error + Send>),
+    SendableDeserialization(#[source] Box<dyn Error + Send + Sync>),
+
+    #[error("LinkError: Link failed operation with error: {0}")]
+    LinkError(#[source] Box<dyn Error + Send + Sync>),
 
     #[error("The receiver has been taken from this link set (or this LinkSet is a .clone())")]
     ReceiverTaken,

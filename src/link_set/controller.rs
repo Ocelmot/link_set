@@ -1,9 +1,10 @@
 use std::{error::Error, marker::PhantomData, time::Duration};
 
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::debug;
 
 use crate::{
-    LinkError, LinkResult, LinkSetReader,
+    LinkSetError, LinkSetResult, LinkSetReader,
     core::start_core,
     epoch::Epoch,
     links::{
@@ -12,8 +13,8 @@ use crate::{
     },
 };
 
-pub trait LinkSetSendable: Send + Sync + 'static {
-    type E: Error + Send;
+pub trait LinkSetSendable: std::fmt::Debug + Send + Sync + 'static {
+    type E: Error + Send + Sync;
     fn to_bytes(self) -> Result<Vec<u8>, Self::E>;
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, Self::E>
     where
@@ -107,7 +108,7 @@ pub enum LinkSetMessage<M: LinkSetSendable> {
 }
 
 impl<M: LinkSetSendable> TryFrom<LinkSetMessageInner> for LinkSetMessage<M> {
-    type Error = LinkError;
+    type Error = LinkSetError;
     fn try_from(value: LinkSetMessageInner) -> Result<Self, Self::Error> {
         match value {
             LinkSetMessageInner::Disconnected => Ok(LinkSetMessage::Disconnected),
@@ -117,7 +118,7 @@ impl<M: LinkSetSendable> TryFrom<LinkSetMessageInner> for LinkSetMessage<M> {
             }
             LinkSetMessageInner::Message(bytes, epoch) => Ok(LinkSetMessage::Message(
                 M::from_bytes(bytes)
-                    .map_err(|e| LinkError::SendableDeserialization(Box::new(e)))?,
+                    .map_err(|e| LinkSetError::SendableDeserialization(Box::new(e)))?,
                 epoch,
             )),
         }
@@ -146,130 +147,128 @@ impl<M: LinkSetSendable> LinkSet<M> {
     }
 
     /// Cause the LinkSet to attempt to connect using stored addresses, if any.
-    pub async fn connect(&self) -> LinkResult {
+    pub async fn connect(&self) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::Connect))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Cause the LinkSet to disconnect, clearing all active links it may contain
-    pub async fn disconnect(&self) -> LinkResult {
+    pub async fn disconnect(&self) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::Disconnect))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Adds a new connector to the link set for the purposes of reestablishing
     /// a broken connection.
-    pub async fn add_connector<C: LinkConnector>(&self, conn: C) -> LinkResult {
+    pub async fn add_connector<C: LinkConnector>(&self, conn: C) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddConnector(
                 Box::new(conn) as Box<dyn PinnedLinkConnector>
             )))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Enables or disables the LinkSet auto reconnect feature
-    pub async fn set_auto_connect(&self, reconnect: bool) -> LinkResult {
+    pub async fn set_auto_connect(&self, reconnect: bool) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Config(LinkSetControlConfig::AutoConnect(reconnect)))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Sets the reconnection timeout, the time the link will spend attempting a
     /// reconnection with the same epoch
-    pub async fn set_reconnection_timeout(&self, timeout: Option<Duration>) -> LinkResult {
+    pub async fn set_reconnection_timeout(&self, timeout: Option<Duration>) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Config(LinkSetControlConfig::ReconnectTimeout(timeout)))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
 
     /// Sets the grace period timeout, the time the link set will wait for an
     /// incoming connection and still use the same epoch
-    pub async fn set_grace_period_timeout(&self, grace_period: Option<Duration>) -> LinkResult {
+    pub async fn set_grace_period_timeout(&self, grace_period: Option<Duration>) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Config(LinkSetControlConfig::GracePeriod(grace_period)))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Adds an address to the link set to use for auto reconnection
-    pub async fn add_addr(&self, addr: String) -> LinkResult {
+    pub async fn add_addr(&self, addr: String) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress { addr, reuse: true }))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Adds an address to the link set to try to use for auto reconnection one time
-    pub async fn try_addr(&self, addr: String) -> LinkResult {
+    pub async fn try_addr(&self, addr: String) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress  { addr, reuse: false }))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Add a new link to the LinkSet
-    pub async fn add_link<L>(&self, link: L) -> LinkResult
-    where
-        L: Into<Box<dyn PinnedLink>> + 'static,
+    pub async fn add_link(&self, link: Box<dyn PinnedLink>) -> LinkSetResult
     {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(link.into())))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Send a message across the link set
-    pub async fn send(&self, msg: M) -> LinkResult {
+    pub async fn send(&self, msg: M) -> LinkSetResult {
         let msg = msg
             .to_bytes()
-            .map_err(|e| LinkError::SendableSerialization(Box::new(e)))?;
+            .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, None)))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Send a message across the link set, using the epoch to prevent this
     /// message to be sent after a reconnection.
-    pub async fn send_with_epoch(&self, msg: M, epoch: Epoch) -> LinkResult {
+    pub async fn send_with_epoch(&self, msg: M, epoch: Epoch) -> LinkSetResult {
         let msg = msg
             .to_bytes()
-            .map_err(|e| LinkError::SendableSerialization(Box::new(e)))?;
+            .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, Some(epoch))))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Send a message across the link set, using the epoch to prevent this
     /// message to be sent after a reconnection.
-    pub async fn send_opt_epoch(&self, msg: M, epoch: Option<Epoch>) -> LinkResult {
+    pub async fn send_opt_epoch(&self, msg: M, epoch: Option<Epoch>) -> LinkSetResult {
         let msg = msg
             .to_bytes()
-            .map_err(|e| LinkError::SendableSerialization(Box::new(e)))?;
+            .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, epoch)))
             .await
-            .map_err(|_| LinkError::Terminated)
+            .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Get a message from the link set
-    pub async fn recv(&mut self) -> LinkResult<LinkSetMessage<M>> {
+    pub async fn recv(&mut self) -> LinkSetResult<LinkSetMessage<M>> {
         let ret = self
             .from_core
             .as_mut()
-            .ok_or(LinkError::ReceiverTaken)?
+            .ok_or(LinkSetError::ReceiverTaken)?
             .recv()
             .await
-            .ok_or(LinkError::Terminated)?
+            .ok_or(LinkSetError::Terminated)?
             .try_into()?;
 
         if let LinkSetMessage::Connected(epoch) = &ret {
@@ -278,6 +277,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
         if let LinkSetMessage::Disconnected = &ret {
             self.state = None;
         }
+        debug!("LinkSet emitted: {:?}", ret);
         Ok(ret)
     }
 
