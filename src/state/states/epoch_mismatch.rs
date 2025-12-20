@@ -1,7 +1,9 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, time::Duration};
 
 use tokio::time::Instant;
 use tracing::{error, trace};
+
+const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 
 use crate::{
     epoch::{Epoch, compare_epochs},
@@ -171,13 +173,15 @@ impl CoreStateState for EpochMismatch {
 impl StateTransitionWithParamAsync<Disconnected, WrappedLink> for EpochMismatch {
     async fn transition_from(
         old_state: Box<Disconnected>,
-        _common: &mut CommonState,
+        common: &mut CommonState,
         link: WrappedLink,
     ) -> Box<EpochMismatch> {
         let mut links = LinkManager::new();
         links.add_link(link);
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
+
+        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns: old_state.conns,
@@ -193,7 +197,7 @@ impl StateTransitionWithParamAsync<Disconnected, WrappedLink> for EpochMismatch 
 impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
     async fn transition_from(
         old_state: Box<Connecting>,
-        _common: &mut CommonState,
+        common: &mut CommonState,
         link: WrappedLink,
     ) -> Box<EpochMismatch> {
         let (conns, addrs) = match old_state.connector.cancel().await {
@@ -209,6 +213,9 @@ impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
         links.add_link(link);
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
+
+        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+
         Box::new(EpochMismatch {
             conns,
             addrs,
@@ -223,10 +230,13 @@ impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
 impl StateTransitionFromAsync<Connected> for EpochMismatch {
     async fn transition_from(
         mut old_state: Box<Connected>,
-        _common: &mut CommonState,
+        common: &mut CommonState,
     ) -> Box<Self> {
         let epoch = Some(old_state.epoch.increment());
         let _ = old_state.links.reset(epoch, true).await;
+
+        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+
         Box::new(EpochMismatch {
             conns: old_state.conns,
             addrs: old_state.addrs,
