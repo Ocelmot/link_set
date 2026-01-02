@@ -48,6 +48,10 @@ pub(crate) enum LinkSetControlConfig {
 /// Enables or disables the LinkSet auto reconnect feature
     AutoConnect(bool),
 
+    /// The amount of time the system will wait to establish a new connection
+    /// before returning to the disconnected state.
+    ConnectTimeout(Option<Duration>),
+
     /// The amount of time the system is willing to try reconnecting with the
     /// same epoch
     ReconnectTimeout(Option<Duration>),
@@ -76,7 +80,7 @@ pub(crate) enum LinkSetMessageInner {
     ///
     /// These messages are not sent unless the LinkSet's reconnect feature is
     /// enabled.
-    Connecting(bool),
+    AttemptingConnection(bool),
 
     /// A [Message] was received with the given epoch
     Message(Vec<u8>, Epoch),
@@ -101,7 +105,7 @@ pub enum LinkSetMessage<M: LinkSetSendable> {
     ///
     /// These messages are not sent unless the LinkSet's reconnect feature is
     /// enabled.
-    Connecting(bool),
+    AttemptingConnection(bool),
 
     /// A [Message] was received with the given epoch
     Message(M, Epoch),
@@ -113,8 +117,8 @@ impl<M: LinkSetSendable> TryFrom<LinkSetMessageInner> for LinkSetMessage<M> {
         match value {
             LinkSetMessageInner::Disconnected => Ok(LinkSetMessage::Disconnected),
             LinkSetMessageInner::Connected(epoch) => Ok(LinkSetMessage::Connected(epoch)),
-            LinkSetMessageInner::Connecting(is_connecting) => {
-                Ok(LinkSetMessage::Connecting(is_connecting))
+            LinkSetMessageInner::AttemptingConnection(is_connecting) => {
+                Ok(LinkSetMessage::AttemptingConnection(is_connecting))
             }
             LinkSetMessageInner::Message(bytes, epoch) => Ok(LinkSetMessage::Message(
                 M::from_bytes(bytes)
@@ -177,6 +181,15 @@ impl<M: LinkSetSendable> LinkSet<M> {
     pub async fn set_auto_connect(&self, reconnect: bool) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Config(LinkSetControlConfig::AutoConnect(reconnect)))
+            .await
+            .map_err(|_| LinkSetError::Terminated)
+    }
+
+    /// Sets the connection timeout, the time the link will spend attempting to
+    /// connect when establishing a new epoch.
+    pub async fn set_connection_timeout(&self, timeout: Option<Duration>) -> LinkSetResult {
+        self.to_core
+            .send(LinkSetControl::Config(LinkSetControlConfig::ConnectTimeout(timeout)))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }

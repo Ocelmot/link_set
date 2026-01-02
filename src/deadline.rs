@@ -30,24 +30,27 @@ impl Deadline {
         }
     }
 
-    pub(crate) fn set_deadline_from_now(&mut self, deadline: Duration) {
-        let deadline = Instant::now() + deadline;
+    pub(crate) fn modify_deadline(&mut self, deadline: Instant) {
         match &mut self.deadline {
             Some(sleep) => sleep.as_mut().reset(deadline),
             None => self.deadline = Some(Box::pin(sleep_until(deadline))),
         }
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.deadline = None;
-        self.repeat = None;
+    pub(crate) fn modify_deadline_from_now(&mut self, deadline: Duration) {
+        let deadline = Instant::now() + deadline;
+        self.modify_deadline(deadline);
     }
 
-    pub(crate) fn has_deadline(&mut self) -> bool {
+    pub(crate) fn has_deadline(&self) -> bool {
         self.deadline.is_some()
     }
 
-    pub(crate) fn set_repeat(&mut self, repeat: Duration) {
+    pub(crate) fn clear_deadline(&mut self) {
+        self.deadline = None;
+    }
+
+    pub(crate) fn modify_repeat(&mut self, repeat: Duration) {
         if self.deadline.is_none() {
             let deadline = Instant::now() + repeat;
             self.deadline = Some(Box::pin(sleep_until(deadline)));
@@ -55,10 +58,23 @@ impl Deadline {
         self.repeat = Some(repeat);
     }
 
+    pub(crate) fn has_repeat(&self) -> bool {
+        self.repeat.is_some()
+    }
+
+    pub(crate) fn clear_repeat(&mut self) {
+        self.repeat = None;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.deadline = None;
+        self.repeat = None;
+    }
+
     pub(crate) fn is_elapsed(&self) -> bool {
         if let Some(deadline) = &self.deadline {
             deadline.is_elapsed()
-        }else {
+        } else {
             false
         }
     }

@@ -9,8 +9,7 @@ use crate::{
     state::{
         state::{CommonState, CoreStateState},
         states::{
-            StateTransitionFrom, States, connected::Connected, connecting::Connecting,
-            disconnected::Disconnected, to_state, to_state_async, to_state_param_async,
+            StateTransitionFrom, StateTransitionFromAsync, States, connected::Connected, connecting::Connecting, disconnected::Disconnected, to_state_async, to_state_param_async
         },
     },
 };
@@ -72,19 +71,19 @@ impl CoreStateState for Reconnecting {
     ) -> States {
         // This is possible since the read half has been separated from
         // the link itself, and might drop at a different time
-
         match msg {
             LinkProtocol::Reset { epoch, request } => {
                 // if a request for a mismatched epoch arrives, return to
-                // EpochMismatch
+                // Connecting
                 if request {
                     if epoch != Some(self.epoch) {
                         // cant reply, ignore
                         self.into()
                     } else {
                         // a mismatch has occurred, and we are disconnected,
-                        // goto Connecting
-                        to_state::<Connecting, _>(self, common)
+                        // goto Connecting. We cant go to EpochMismatch since we
+                        // don't have any senders.
+                        to_state_async::<Connecting, _>(self, common).await
                     }
                 } else {
                     self.into()
@@ -132,17 +131,19 @@ impl CoreStateState for Reconnecting {
     async fn timer(self: Box<Self>, common: &mut CommonState) -> States {
         // reconnecting period has finished, move to next state
         if common.auto_connect() {
-            to_state::<Connecting, _>(self, common)
+            to_state_async::<Connecting, _>(self, common).await
         } else {
             to_state_async::<Disconnected, _>(self, common).await
         }
     }
 }
 
-impl StateTransitionFrom<Connected> for Reconnecting {
-    fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
+impl StateTransitionFromAsync<Connected> for Reconnecting {
+    async fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
+        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+
         if let Some(timeout) = common.reconnecting_timeout().clone() {
-            common.get_timer().set_deadline_from_now(timeout);
+            common.get_timer().modify_deadline_from_now(timeout);
         } else {
             common.get_timer().clear();
         }

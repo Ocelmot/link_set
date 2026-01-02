@@ -144,7 +144,7 @@ impl CoreStateState for GracePeriod {
 impl StateTransitionFrom<Connected> for GracePeriod {
     fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
         if let Some(timeout) = common.grace_period_timeout().clone() {
-            common.get_timer().set_deadline_from_now(timeout);
+            common.get_timer().modify_deadline_from_now(timeout);
         } else {
             common.get_timer().clear();
         }

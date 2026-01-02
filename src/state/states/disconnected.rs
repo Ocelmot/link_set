@@ -8,9 +8,9 @@ use crate::{
     state::{
         state::{CommonState, CoreStateState},
         states::{
-            StateTransitionFromAsync, States,
-            connected::Connected, connecting::Connecting, epoch_mismatch::EpochMismatch,
-            grace_period::GracePeriod, reconnecting::Reconnecting, to_state, to_state_param, to_state_param_async,
+            StateTransitionFromAsync, States, connected::Connected, connecting::Connecting,
+            epoch_mismatch::EpochMismatch, grace_period::GracePeriod, reconnecting::Reconnecting,
+            to_state_async, to_state_param_async,
         },
     },
 };
@@ -42,7 +42,7 @@ impl CoreStateState for Disconnected {
         msg: LinkSetControlCommand,
     ) -> States {
         match msg {
-            LinkSetControlCommand::Connect => to_state::<Connecting, _>(self, common),
+            LinkSetControlCommand::Connect => to_state_async::<Connecting, _>(self, common).await,
             LinkSetControlCommand::Disconnect => self.into(),
             LinkSetControlCommand::AddConnector(conn) => {
                 trace!("LinkSetCore adding connector");
@@ -65,7 +65,7 @@ impl CoreStateState for Disconnected {
                 // otherwise discard if message has an epoch, it cannot be
                 // correct since we are disconnected
                 if !self.conns.is_empty() && !self.addrs.is_empty() && epoch.is_none() {
-                    to_state_param::<Connecting, _, _>(self, common, data)
+                    to_state_param_async::<Connecting, _, _>(self, common, data).await
                 } else {
                     self.into()
                 }
@@ -106,6 +106,7 @@ impl StateTransitionFromAsync<Connecting> for Disconnected {
             }
         };
         common.get_timer().clear();
+        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
         Box::new(Disconnected {
             conns,
             addrs,
@@ -131,8 +132,14 @@ impl StateTransitionFromAsync<EpochMismatch> for Disconnected {
 }
 
 impl StateTransitionFromAsync<Connected> for Disconnected {
-    async fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Disconnected> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::Disconnected).await;
+    async fn transition_from(
+        old_state: Box<Connected>,
+        common: &mut CommonState,
+    ) -> Box<Disconnected> {
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::Disconnected)
+            .await;
         common.get_timer().clear();
         Box::new(Disconnected {
             conns: old_state.conns,
@@ -152,7 +159,11 @@ impl StateTransitionFromAsync<Reconnecting> for Disconnected {
                 (Vec::new(), Vec::new())
             }
         };
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::Disconnected).await;
+        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::Disconnected)
+            .await;
         common.get_timer().clear();
         Box::new(Disconnected {
             conns,
@@ -165,7 +176,10 @@ impl StateTransitionFromAsync<Reconnecting> for Disconnected {
 impl StateTransitionFromAsync<GracePeriod> for Disconnected {
     async fn transition_from(old_state: Box<GracePeriod>, common: &mut CommonState) -> Box<Self> {
         common.get_timer().clear();
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::Disconnected).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::Disconnected)
+            .await;
         Box::new(Disconnected {
             conns: old_state.conns,
             addrs: old_state.addrs,

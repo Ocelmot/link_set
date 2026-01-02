@@ -26,7 +26,7 @@ pub(crate) struct CommonState {
     /// Automatically attempt to reconnect when the link set disconnects
     auto_connect: bool,
 
-    /// Timeout for Connecting state (Some(ZERO) = move directly to connecting,
+    /// Timeout for Connecting state (Some(ZERO) = immediately disconnect,
     /// None = try forever)
     connecting_timeout: Option<Duration>,
 
@@ -51,7 +51,7 @@ impl CommonState {
             timer: Deadline::new(),
 
             auto_connect: true,
-            connecting_timeout: Some(Duration::from_secs(30)),
+            connecting_timeout: Some(Duration::from_secs(60)),
             reconnecting_timeout: Some(Duration::ZERO),
             grace_period_timeout: Some(Duration::ZERO),
         }
@@ -86,6 +86,13 @@ impl CommonState {
     }
     pub(crate) fn set_auto_connect(&mut self, auto_connect: bool) {
         self.auto_connect = auto_connect;
+    }
+
+    pub(crate) fn connecting_timeout(&self) -> &Option<Duration> {
+        &self.connecting_timeout
+    }
+    pub(crate) fn set_connecting_timeout(&mut self, connecting_timeout: Option<Duration>) {
+        self.connecting_timeout = connecting_timeout
     }
 
     pub(crate) fn reconnecting_timeout(&self) -> &Option<Duration> {
@@ -151,6 +158,7 @@ impl CoreState {
     pub(crate) async fn ctrl_msg_cfg(mut self, msg: LinkSetControlConfig) -> Self {
         match msg {
             LinkSetControlConfig::AutoConnect(connect) => self.common.set_auto_connect(connect),
+            LinkSetControlConfig::ConnectTimeout(timeout) => self.common.set_connecting_timeout(timeout),
             LinkSetControlConfig::ReconnectTimeout(timeout) => self.common.set_reconnecting_timeout(timeout),
             LinkSetControlConfig::GracePeriod(timeout) => self.common.set_grace_period_timeout(timeout),
         }

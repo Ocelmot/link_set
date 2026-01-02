@@ -49,7 +49,7 @@ impl Connected {
             if let Some(Duration::ZERO) = common.reconnecting_timeout() {
                 // Skip reconnecting
             } else {
-                return to_state::<Reconnecting, _>(self, common);
+                return to_state_async::<Reconnecting, _>(self, common).await;
             }
 
             if let Some(Duration::ZERO) = common.grace_period_timeout() {
@@ -223,7 +223,7 @@ impl StateTransitionWithParamAsync<EpochMismatch, Epoch> for Connected {
         }
 
         common.get_timer().clear();
-        common.get_timer().set_repeat(CONNECTED_TIMER_INTERVAL);
+        common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
         Box::new(Self {
             conns: old_state.conns,
             addrs: old_state.addrs,
@@ -254,8 +254,10 @@ impl StateTransitionWithParamAsync<Reconnecting, WrappedLink> for Connected {
         let mut links = LinkManager::with_link(link);
         links.ping_all().await;
 
+        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+
         common.get_timer().clear();
-        common.get_timer().set_repeat(CONNECTED_TIMER_INTERVAL);
+        common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
         Box::new(Self {
             conns,
             addrs,
@@ -277,7 +279,7 @@ impl StateTransitionWithParamAsync<GracePeriod, WrappedLink> for Connected {
         links.ping_all().await;
 
         common.get_timer().clear();
-        common.get_timer().set_repeat(CONNECTED_TIMER_INTERVAL);
+        common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
         Box::new(Self {
             conns: old_state.conns,
             addrs: old_state.addrs,

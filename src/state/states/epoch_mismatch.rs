@@ -7,14 +7,14 @@ const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 
 use crate::{
     epoch::{Epoch, compare_epochs},
-    link_set::controller::LinkSetControlCommand,
+    link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
     links::{WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
     protocol::LinkProtocol,
     state::{
         state::{CommonState, CoreStateState},
         states::{
             StateTransitionFromAsync, StateTransitionWithParamAsync, States, connected::Connected,
-            connecting::Connecting, disconnected::Disconnected, to_state, to_state_async,
+            connecting::Connecting, disconnected::Disconnected, to_state_async,
             to_state_param_async,
         },
     },
@@ -158,7 +158,7 @@ impl CoreStateState for EpochMismatch {
 
         if self.links.is_empty() {
             if common.auto_connect() {
-                return to_state::<Connecting, _>(self, common);
+                return to_state_async::<Connecting, _>(self, common).await;
             } else {
                 return to_state_async::<Disconnected, _>(self, common).await;
             }
@@ -181,7 +181,7 @@ impl StateTransitionWithParamAsync<Disconnected, WrappedLink> for EpochMismatch 
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
 
-        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns: old_state.conns,
@@ -214,7 +214,9 @@ impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
 
-        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+
+        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns,
@@ -235,7 +237,7 @@ impl StateTransitionFromAsync<Connected> for EpochMismatch {
         let epoch = Some(old_state.epoch.increment());
         let _ = old_state.links.reset(epoch, true).await;
 
-        common.get_timer().set_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns: old_state.conns,
