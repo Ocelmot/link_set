@@ -1,4 +1,4 @@
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 use crate::{
     epoch::{Epoch, opt_epoch_increment},
@@ -64,7 +64,10 @@ impl CoreStateState for Disconnected {
                 // message should trigger connection, if we are able to connect,
                 // otherwise discard if message has an epoch, it cannot be
                 // correct since we are disconnected
-                if !self.conns.is_empty() && !self.addrs.is_empty() && epoch.is_none() {
+                if common.auto_connect() && epoch.is_none(){
+                    if self.conns.is_empty(){
+                        warn!("Attempting connection with no connectors. Make sure to add a connector.");
+                    }
                     to_state_param_async::<Connecting, _, _>(self, common, data).await
                 } else {
                     self.into()
