@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
@@ -7,38 +8,38 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::link_set::controller::{LinkSetControl, LinkSetControlCommand};
+use crate::links::Address;
 use crate::links::connector::PinnedLinkConnector;
 use crate::{LinkSetError, LinkSetResult};
 
 enum ConnectorManagerControl {
-    AddAddr(String),
-    TryAddr(String),
+    AddAddr(Address),
+    TryAddr(Address),
     AddConnector(Box<dyn PinnedLinkConnector>),
 }
 
 pub(crate) struct ConnectorManager {
     tx: Sender<ConnectorManagerControl>,
     stop_tx: oneshot::Sender<()>,
-    handle: JoinHandle<(Vec<Box<dyn PinnedLinkConnector>>, Vec<(String, bool)>)>,
+    handle: JoinHandle<(HashMap<String, Box<dyn PinnedLinkConnector>>, Vec<(Address, bool)>)>,
 }
 
 impl ConnectorManager {
     pub fn start(
         mut to_core: Sender<LinkSetControl>,
         // addrs is a list of addresses, and a flag to indicate if they are permanent
-        mut addrs: Vec<(String, bool)>,
+        mut addrs: Vec<(Address, bool)>,
         // conns is a list of connectors that can be used
-        mut conns: Vec<Box<dyn PinnedLinkConnector>>,
+        mut conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
     ) -> Self {
         let (tx, mut rx) = channel(10);
         let (stop_tx, stop_rx) = oneshot::channel();
 
         let handle = tokio::task::spawn(async move {
             let mut addr_index = 0;
-            let mut conn_index = 0;
             trace!("Connector started");
             select! {
                 _ = async {
@@ -51,7 +52,6 @@ impl ConnectorManager {
                             &mut to_core,
                             &mut conns,
                             &mut addrs,
-                            &mut conn_index,
                             &mut addr_index,
                         )
                         .await;
@@ -71,11 +71,11 @@ impl ConnectorManager {
         }
     }
 
-    pub async fn add_addr(&self, addr: String) {
+    pub async fn add_addr(&self, addr: Address) {
         let _ = self.tx.send(ConnectorManagerControl::AddAddr(addr)).await;
     }
 
-    pub async fn try_addr(&self, addr: String) {
+    pub async fn try_addr(&self, addr: Address) {
         let _ = self.tx.send(ConnectorManagerControl::TryAddr(addr)).await;
     }
 
@@ -88,7 +88,7 @@ impl ConnectorManager {
 
     pub async fn cancel(
         self,
-    ) -> LinkSetResult<(Vec<Box<dyn PinnedLinkConnector>>, Vec<(String, bool)>)> {
+    ) -> LinkSetResult<(HashMap<String, Box<dyn PinnedLinkConnector>>, Vec<(Address, bool)>)> {
         drop(self.tx);
         let _ = self.stop_tx.send(());
         self.handle
@@ -109,8 +109,8 @@ impl Debug for ConnectorManagerControl {
 
 async fn process_rx(
     rx: &mut Receiver<ConnectorManagerControl>,
-    conns: &mut Vec<Box<dyn PinnedLinkConnector>>,
-    addrs: &mut Vec<(String, bool)>,
+    conns: &mut HashMap<String, Box<dyn PinnedLinkConnector>>,
+    addrs: &mut Vec<(Address, bool)>,
 ) {
     loop {
         let ctrl = if addrs.len() == 0 || conns.len() == 0 {
@@ -140,40 +140,53 @@ async fn process_rx(
         trace!("Got control message: {:?}", ctrl);
         match ctrl {
             Some(ConnectorManagerControl::AddAddr(add_addr)) => {
+                let mut contains= false;
                 for (addr, _) in &mut *addrs {
                     if *addr == add_addr {
                         // skip addrs we already have in the list
-                        continue;
+                        contains = true;
+                        break;
                     }
                 }
-                addrs.push((add_addr, true))
+                if !contains {
+                    addrs.push((add_addr, true));
+                }
             }
             Some(ConnectorManagerControl::TryAddr(try_addr)) => {
+                let mut contains= false;
                 for (addr, _) in &mut *addrs {
                     if *addr == try_addr {
                         // skip addrs we already have in the list
-                        continue;
+                        contains = true;
+                        break;
                     }
                 }
-                addrs.push((try_addr, false))
+                if !contains{
+                    addrs.push((try_addr, false));
+                }
             }
-            Some(ConnectorManagerControl::AddConnector(conn)) => conns.push(conn),
+            Some(ConnectorManagerControl::AddConnector(conn)) => {
+                let scheme = conn.scheme();
+                if conns.insert(scheme.to_string(), conn).is_some() {
+                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                }
+            },
             None => break,
-        }
+        };
     }
 }
 
 async fn process_connecting(
     to_core: &mut Sender<LinkSetControl>,
-    conns: &mut Vec<Box<dyn PinnedLinkConnector>>,
-    addrs: &mut Vec<(String, bool)>,
-    conn_index: &mut usize,
+    conns: &mut HashMap<String, Box<dyn PinnedLinkConnector>>,
+    addrs: &mut Vec<(Address, bool)>,
     addr_index: &mut usize,
 ) {
     if let Some((addr, retain_addr)) = addrs.get(*addr_index) {
-        if let Some(conn) = conns.get_mut(*conn_index) {
-            trace!("Connector attempting to connect to {addr} with connector index {conn_index}");
-            let res = conn.connect(addr.clone()).await;
+        if let Some(conn) = conns.get_mut(addr.scheme()){
+            let scheme = conn.scheme();
+            trace!("Connector attempting to connect to {addr} with connector scheme {scheme}");
+            let res = conn.connect(addr.addr().to_string()).await;
             match res {
                 Ok(link) => {
                     trace!("Connector made connection, adding link");
@@ -188,14 +201,14 @@ async fn process_connecting(
                     trace!("Connector did not make a connection: {}", e);
                 }
             }
-            *conn_index += 1;
-        } else {
-            *conn_index = 0;
+
             if *retain_addr {
                 *addr_index += 1;
             } else {
                 addrs.remove(*addr_index);
             }
+        } else {
+            *addr_index += 1;
         }
     } else {
         trace!("Address/Connector list finished, sleeping");

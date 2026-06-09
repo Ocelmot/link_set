@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use tracing::{error, trace, warn};
 
 use crate::{
     epoch::{Epoch, opt_epoch_increment},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::connector::PinnedLinkConnector,
+    links::{Address, connector::PinnedLinkConnector},
     protocol::LinkProtocol,
     state::{
         state::{CommonState, CoreStateState},
@@ -17,9 +19,9 @@ use crate::{
 
 pub(crate) struct Disconnected {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: Vec<Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(String, bool)>,
+    pub(crate) addrs: Vec<(Address, bool)>,
 
     /// The next allowable epoch (None means any would be ok)
     pub(crate) epoch: Option<Epoch>,
@@ -28,7 +30,7 @@ pub(crate) struct Disconnected {
 impl Disconnected {
     pub fn new() -> Self {
         Disconnected {
-            conns: Vec::new(),
+            conns: HashMap::new(),
             addrs: Vec::new(),
             epoch: None,
         }
@@ -46,7 +48,11 @@ impl CoreStateState for Disconnected {
             LinkSetControlCommand::Disconnect => self.into(),
             LinkSetControlCommand::AddConnector(conn) => {
                 trace!("LinkSetCore adding connector");
-                self.conns.push(conn);
+                let scheme = conn.scheme();
+                if self.conns.insert(scheme.to_string(), conn).is_some() {
+                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                }
+
                 self.into()
             }
             LinkSetControlCommand::AddAddress { addr, reuse } => {
@@ -105,7 +111,7 @@ impl StateTransitionFromAsync<Connecting> for Disconnected {
             Err(_) => {
                 error!("Panic occurred in connector manager");
                 // Should probably close down here so it can be handled properly by the user
-                (Vec::new(), Vec::new())
+                (HashMap::new(), Vec::new())
             }
         };
         common.get_timer().clear();
@@ -159,7 +165,7 @@ impl StateTransitionFromAsync<Reconnecting> for Disconnected {
             Err(_) => {
                 error!("Panic occurred in connector manager");
                 // Should probably close down here so it can be handled properly by the user
-                (Vec::new(), Vec::new())
+                (HashMap::new(), Vec::new())
             }
         };
         let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;

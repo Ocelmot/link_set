@@ -6,23 +6,26 @@ use crate::{
 };
 
 pub trait LinkConnector: Send + Sync + 'static{
+    fn scheme(&self) -> &'static str;
     fn connect(&mut self, addr: String) -> impl Future<Output = LinkSetResult<impl Link + 'static>> + Send + Sync;
 }
 
 // Link connector is implemented for async functions that match its signature
-impl<F: Send + Sync + 'static, Ret, L> LinkConnector for F
+impl<F: Send + Sync + 'static, Ret, L> LinkConnector for (&'static str, F)
 where
     F: FnMut(String) -> Ret,
     Ret: Future<Output = LinkSetResult<L>> + Send + Sync,
     L: Link + 'static,
 {
+    fn scheme(&self) -> &'static str {self.0}
     fn connect(&mut self, addr: String) -> impl Future<Output = LinkSetResult<impl Link + 'static>> {
-        self(addr)
+        self.1(addr)
     }
 }
 
 // The pinned version of the LinkConnector trait. Wraps returned futures with pin and box
 pub(crate) trait PinnedLinkConnector: Sync + Send {
+    fn scheme(&self) -> &'static str;
     fn connect<'a>(
         &'a mut self,
         addr: String,
@@ -31,6 +34,7 @@ pub(crate) trait PinnedLinkConnector: Sync + Send {
 
 // PinnedLinkConnector is implemented for all LinkConnectors
 impl<LC: LinkConnector> PinnedLinkConnector for LC {
+    fn scheme(&self) -> &'static str {self.scheme()}
     fn connect<'a>(
         &'a mut self,
         addr: String,

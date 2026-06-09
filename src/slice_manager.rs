@@ -275,8 +275,6 @@ fn make_slices(
 
 #[cfg(test)]
 mod tests {
-    use rand::{seq::SliceRandom, thread_rng};
-
     use super::*;
 
     #[test]

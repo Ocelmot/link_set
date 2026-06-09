@@ -4,13 +4,9 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::debug;
 
 use crate::{
-    LinkSetError, LinkSetResult, LinkSetReader,
-    core::start_core,
-    epoch::Epoch,
-    links::{
-        connector::{LinkConnector, PinnedLinkConnector},
-        link::PinnedLink,
-    },
+    LinkSetError, LinkSetReader, LinkSetResult, core::start_core, epoch::Epoch, links::{
+        Address, connector::{LinkConnector, PinnedLinkConnector}, link::PinnedLink
+    }
 };
 
 pub trait LinkSetSendable: std::fmt::Debug + Send + Sync + 'static {
@@ -37,7 +33,7 @@ pub(crate) enum LinkSetControlCommand {
     
     /// Adds an address to the link set to use when connecting. The bool
     /// indicates if the address should be used multiple times, or just once
-    AddAddress{addr: String, reuse: bool},
+    AddAddress{addr: Address, reuse: bool},
     /// Add a new link to the LinkSet (moves the set towards connected)
     AddLink(Box<dyn PinnedLink>),
     /// Send a message across the link set
@@ -71,15 +67,17 @@ pub(crate) enum LinkSetMessageInner {
     /// The LinkSet successfully established a connection
     Connected(Epoch),
 
-    /// The LinkSet has started or stopped reconnecting.
+    /// The LinkSet has started or stopped attempting to make a connection with
+    /// its peer.
     ///
-    /// A reconnection allows the connection to be reestablished within a
-    /// certain time period without causing a Disconnected/Connected cycle.
-    /// However, it may still be useful to know if the LinkSet is attempting a
-    /// reconnect to provide it with new addresses to help its attempt.
-    ///
-    /// These messages are not sent unless the LinkSet's reconnect feature is
-    /// enabled.
+    /// When the LinkSet starts attempting a connection it will emit
+    /// AttemptingConnection(true). When it stops it will emit
+    /// AttemptingConnection(false).
+    /// 
+    /// Note that it will emit false even when a connection was successful, not
+    /// only when it has timed out. This is useful to the consumer to allow
+    /// additional addresses to be passed in to the link set for attempted
+    /// connections.
     AttemptingConnection(bool),
 
     /// A [Message] was received with the given epoch
@@ -214,7 +212,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
     }
 
     /// Adds an address to the link set to use for auto reconnection
-    pub async fn add_addr(&self, addr: String) -> LinkSetResult {
+    pub async fn add_addr(&self, addr: Address) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress { addr, reuse: true }))
             .await
@@ -222,7 +220,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
     }
 
     /// Adds an address to the link set to try to use for auto reconnection one time
-    pub async fn try_addr(&self, addr: String) -> LinkSetResult {
+    pub async fn try_addr(&self, addr: Address) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress  { addr, reuse: false }))
             .await

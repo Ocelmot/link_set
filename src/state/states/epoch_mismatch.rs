@@ -1,14 +1,14 @@
-use std::{cmp::Ordering, time::Duration};
+use std::{cmp::Ordering, collections::HashMap, time::Duration};
 
 use tokio::time::Instant;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 
 use crate::{
     epoch::{Epoch, compare_epochs},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
+    links::{Address, WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
     protocol::LinkProtocol,
     state::{
         state::{CommonState, CoreStateState},
@@ -22,9 +22,9 @@ use crate::{
 
 pub(crate) struct EpochMismatch {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: Vec<Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(String, bool)>,
+    pub(crate) addrs: Vec<(Address, bool)>,
 
     pub(crate) links: LinkManager,
     pub(crate) queued_msgs: Vec<Vec<u8>>,
@@ -59,7 +59,11 @@ impl CoreStateState for EpochMismatch {
                 to_state_async::<Disconnected, _>(self, common).await
             }
             LinkSetControlCommand::AddConnector(conn) => {
-                self.conns.push(conn);
+                let scheme = conn.scheme();
+                if self.conns.insert(scheme.to_string(), conn).is_some() {
+                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                }
+
                 self.into()
             }
             LinkSetControlCommand::AddAddress { addr, reuse } => {
@@ -205,7 +209,7 @@ impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
             Err(_) => {
                 error!("Panic occurred in connector manager");
                 // Should probably close down here so it can be handled properly by the user
-                (Vec::new(), Vec::new())
+                (HashMap::new(), Vec::new())
             }
         };
 

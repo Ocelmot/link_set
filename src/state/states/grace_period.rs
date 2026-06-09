@@ -1,9 +1,11 @@
-use tracing::trace;
+use std::collections::HashMap;
+
+use tracing::{trace, warn};
 
 use crate::{
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::connector::PinnedLinkConnector,
+    links::{Address, connector::PinnedLinkConnector},
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
@@ -17,9 +19,9 @@ use crate::{
 
 pub(crate) struct GracePeriod {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: Vec<Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(String, bool)>,
+    pub(crate) addrs: Vec<(Address, bool)>,
 
     pub(crate) msg_mgr: MessageManager,
     pub(crate) epoch: Epoch,
@@ -38,7 +40,11 @@ impl CoreStateState for GracePeriod {
             }
             LinkSetControlCommand::AddConnector(conn) => {
                 trace!("LinkSetCore adding connector");
-                self.conns.push(conn);
+                let scheme = conn.scheme();
+                if self.conns.insert(scheme.to_string(), conn).is_some() {
+                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                }
+
                 self.into()
             }
             LinkSetControlCommand::AddAddress { addr, reuse } => {

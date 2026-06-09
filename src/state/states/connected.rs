@@ -1,12 +1,12 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use tokio::time::Instant;
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 use crate::{
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
+    links::{Address, WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
@@ -24,9 +24,9 @@ const PING_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(crate) struct Connected {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: Vec<Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(String, bool)>,
+    pub(crate) addrs: Vec<(Address, bool)>,
 
     pub(crate) links: LinkManager,
 
@@ -79,7 +79,11 @@ impl CoreStateState for Connected {
             }
             LinkSetControlCommand::AddConnector(conn) => {
                 trace!("LinkSetCore adding connector");
-                self.conns.push(conn);
+                let scheme = conn.scheme();
+                if self.conns.insert(scheme.to_string(), conn).is_some() {
+                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                }
+
                 self.into()
             }
             LinkSetControlCommand::AddAddress { addr, reuse } => {
@@ -247,7 +251,7 @@ impl StateTransitionWithParamAsync<Reconnecting, WrappedLink> for Connected {
             Err(_) => {
                 error!("Panic occurred in connector manager");
                 // Should probably close down here so it can be handled properly by the user
-                (Vec::new(), Vec::new())
+                (HashMap::new(), Vec::new())
             }
         };
 

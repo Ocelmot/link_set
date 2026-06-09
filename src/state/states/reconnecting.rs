@@ -9,7 +9,13 @@ use crate::{
     state::{
         state::{CommonState, CoreStateState},
         states::{
-            StateTransitionFrom, StateTransitionFromAsync, States, connected::Connected, connecting::Connecting, disconnected::Disconnected, to_state_async, to_state_param_async
+            StateTransitionFromAsync,
+            States,
+            connected::Connected,
+            connecting::Connecting,
+            disconnected::Disconnected,
+            to_state_async,
+            to_state_param_async,
         },
     },
 };

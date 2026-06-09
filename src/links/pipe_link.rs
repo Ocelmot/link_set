@@ -446,7 +446,7 @@ mod tests {
 
         // test that it was not received
         let recvd_msg = PinnedLink::recv(&mut b).await;
-        if let Err(LinkSetError::Terminated) = recvd_msg {
+        if let Err(LinkSetError::LinkError(_)) = recvd_msg {
         } else {
             panic!("Link should expire");
         }
@@ -542,7 +542,7 @@ mod tests {
             .expect("should be able to send");
 
         let recvd_msg = PinnedLink::recv(&mut b).await;
-        if let Err(LinkSetError::Terminated) = recvd_msg {
+        if let Err(LinkSetError::LinkError(_)) = recvd_msg {
         } else {
             panic!("Link should expire");
         }

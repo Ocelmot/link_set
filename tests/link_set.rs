@@ -14,7 +14,7 @@ use std::time::Duration;
 ///  - Test that messages are resent when parts are dropped
 use link_set::{
     LinkSet, LinkSetMessage, LinkSetSendable,
-    links::{PipeLinkBuilder, PipeLinkHub},
+    links::{Address, PipeLinkBuilder, PipeLinkHub},
 };
 use tokio::time::sleep;
 use tracing::trace;
@@ -65,14 +65,14 @@ async fn create_default_config(
     if enable_a_connector {
         let hub1 = hub.clone();
         link_set1
-            .add_connector(move |addr: String| {
+            .add_connector(("pipe", move |addr: String| {
                 trace!("Link a is connecting");
                 let mut hub_clone = hub1.clone();
                 async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
-            })
+            }))
             .await
             .expect("link should stay alive long enough to add the connector");
-        link_set1.add_addr(SIDE_2_ADDR.to_owned()).await.unwrap();
+        link_set1.add_addr(Address::new("pipe", SIDE_2_ADDR)).await.unwrap();
     }
 
     // Create the second link set
@@ -92,14 +92,14 @@ async fn create_default_config(
     if enable_b_connector {
         let hub2 = hub.clone();
         link_set2
-            .add_connector(move |addr: String| {
+            .add_connector(("pipe", move |addr: String| {
                 trace!("Link b is connecting");
                 let mut hub_clone = hub2.clone();
                 async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
-            })
+            }))
             .await
             .expect("link should stay alive long enough to add the connector");
-        link_set2.add_addr(SIDE_1_ADDR.to_owned()).await.unwrap();
+        link_set2.add_addr(Address::new("pipe", SIDE_1_ADDR)).await.unwrap();
     }
 
     (hub, link_set1, link_set2)
@@ -187,6 +187,15 @@ async fn pipe_link_set_connect_on_msg() {
         .await
         .expect("Side a should be able to send the message");
 
+    // Connecting
+    let LinkSetMessage::AttemptingConnection(true) = a.recv().await.unwrap() else {
+        panic!("Side a did not begin attempt connection")
+    };
+    let LinkSetMessage::AttemptingConnection(false) = a.recv().await.unwrap() else {
+        panic!("Side a did not end attempt connection")
+    };
+    // Side b gets the link, does not attempt connection
+
     // both sides should emit connected
     let LinkSetMessage::Connected(_e) = a.recv().await.unwrap() else {
         panic!("Side a did not connect")
@@ -220,7 +229,16 @@ async fn pipe_link_expire_5s() {
 
     // connect both sides
     a.connect().await.unwrap();
-    b.connect().await.unwrap();
+    
+    // Connecting
+    let LinkSetMessage::AttemptingConnection(true) = a.recv().await.unwrap() else {
+        panic!("Side a did not begin attempt connection")
+    };
+    let LinkSetMessage::AttemptingConnection(false) = a.recv().await.unwrap() else {
+        panic!("Side a did not end attempt connection")
+    };
+    // Side b gets the link, does not attempt connection
+
     let LinkSetMessage::Connected(_e) = a.recv().await.unwrap() else {
         panic!("Side a did not connect")
     };
@@ -330,7 +348,16 @@ async fn pipe_link_95_loss_50_msg() {
 
     // connect both sides
     a.connect().await.unwrap();
-    b.connect().await.unwrap();
+    
+    // Connecting
+    let LinkSetMessage::AttemptingConnection(true) = a.recv().await.unwrap() else {
+        panic!("Side a did not begin attempt connection")
+    };
+    let LinkSetMessage::AttemptingConnection(false) = a.recv().await.unwrap() else {
+        panic!("Side a did not end attempt connection")
+    };
+    // Side b gets the link, does not attempt connection
+
     let LinkSetMessage::Connected(_e) = a.recv().await.unwrap() else {
         panic!("Side a did not connect")
     };
