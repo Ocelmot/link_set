@@ -633,7 +633,13 @@ mod tests {
         assert_eq!(
             slices
                 .iter()
-                .map(|proto| { proto.data().to_owned() })
+                .map(|proto| {
+                    if let LinkProtocol::MsgSlice { data, .. } = proto {
+                        data.to_owned()
+                    } else {
+                        panic!("Unknown Protocol variant");
+                    }
+                })
                 .collect::<Vec<Vec<u8>>>(),
             vec![vec![100, 97, 116], vec![97]]
         )
@@ -667,7 +673,11 @@ mod tests {
         // println!("out: {:?}",  slices);
 
         for proto in slices {
-            assert_eq!(proto.seq(), seq)
+            if let LinkProtocol::MsgSlice { seq: slice_seq, .. } = proto {
+                assert_eq!(slice_seq, seq);
+            } else {
+                panic!("Unexpected link protocol variant");
+            };
         }
     }
 
@@ -687,7 +697,11 @@ mod tests {
         // println!("out: {:?}",  slices);
 
         for proto in slices {
-            assert_eq!(data_len as u64, proto.seq_len())
+            if let LinkProtocol::MsgSlice { seq_len, .. } = proto {
+                assert_eq!(data_len as u64, seq_len)
+            } else {
+                panic!("Unexpected link protocol variant");
+            };
         }
     }
 
@@ -707,7 +721,13 @@ mod tests {
         assert_eq!(
             slices
                 .iter()
-                .map(|proto| { proto.data().to_owned() })
+                .map(|proto| {
+                    if let LinkProtocol::MsgSlice { data, .. } = proto {
+                        data.to_owned()
+                    } else {
+                        panic!("Unknown Protocol variant");
+                    }
+                })
                 .collect::<Vec<Vec<u8>>>(),
             Vec::<Vec<u8>>::new()
         )
@@ -729,7 +749,13 @@ mod tests {
         assert_eq!(
             slices
                 .iter()
-                .map(|proto| { proto.data().to_owned() })
+                .map(|proto| {
+                    if let LinkProtocol::MsgSlice { data, .. } = proto {
+                        data.to_owned()
+                    } else {
+                        panic!("Unknown Protocol variant");
+                    }
+                })
                 .collect::<Vec<Vec<u8>>>(),
             Vec::<Vec<u8>>::new()
         )

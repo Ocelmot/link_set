@@ -5,7 +5,7 @@ use tracing::debug;
 
 use crate::{
     LinkSetError, LinkSetReader, LinkSetResult, core::start_core, epoch::Epoch, links::{
-        Address, connector::{LinkConnector, PinnedLinkConnector}, link::PinnedLink
+        Address, Link, connector::{LinkConnector, PinnedLinkConnector}, link::PinnedLink
     }
 };
 
@@ -228,8 +228,12 @@ impl<M: LinkSetSendable> LinkSet<M> {
     }
 
     /// Add a new link to the LinkSet
-    pub async fn add_link(&self, link: Box<dyn PinnedLink>) -> LinkSetResult
-    {
+    pub async fn add_link(&self, link: impl Link + 'static) -> LinkSetResult{
+        self.add_link_boxed(Box::new(link)).await
+    }
+
+    /// Add a new boxed link to the LinkSet
+    pub async fn add_link_boxed(&self, link: Box<dyn PinnedLink>) -> LinkSetResult{
         self.to_core
             .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(link.into())))
             .await

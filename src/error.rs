@@ -25,6 +25,9 @@ pub enum LinkSetError {
     #[error("LinkError: Link failed operation with error: {0}")]
     LinkError(#[source] Box<dyn Error + Send + Sync>),
 
+    #[error("Implementation of link requires minimum transport size {required_size}, found {size}")]
+    Implementation{size: u32, required_size: u32},
+
     #[error("The receiver has been taken from this link set (or this LinkSet is a .clone())")]
     ReceiverTaken,
 

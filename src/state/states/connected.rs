@@ -6,7 +6,7 @@ use tracing::{error, trace, warn};
 use crate::{
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
+    links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager},
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
@@ -240,11 +240,11 @@ impl StateTransitionWithParamAsync<EpochMismatch, Epoch> for Connected {
     }
 }
 
-impl StateTransitionWithParamAsync<Reconnecting, WrappedLink> for Connected {
+impl StateTransitionWithParamAsync<Reconnecting, LinkEntry> for Connected {
     async fn transition_from(
         old_state: Box<Reconnecting>,
         common: &mut CommonState,
-        link: WrappedLink,
+        link: LinkEntry,
     ) -> Box<Self> {
         let (conns, addrs) = match old_state.connector.cancel().await {
             Ok((conns, addrs)) => (conns, addrs),
@@ -273,11 +273,11 @@ impl StateTransitionWithParamAsync<Reconnecting, WrappedLink> for Connected {
     }
 }
 
-impl StateTransitionWithParamAsync<GracePeriod, WrappedLink> for Connected {
+impl StateTransitionWithParamAsync<GracePeriod, LinkEntry> for Connected {
     async fn transition_from(
         old_state: Box<GracePeriod>,
         common: &mut CommonState,
-        link: WrappedLink,
+        link: LinkEntry,
     ) -> Box<Self> {
         let mut links = LinkManager::with_link(link);
         links.ping_all().await;

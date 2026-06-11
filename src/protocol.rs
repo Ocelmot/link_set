@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum LinkProtocol {
+pub(crate) enum LinkProtocol {
     Reset {
         epoch: Option<Epoch>,
         request: bool,
@@ -38,63 +38,6 @@ pub enum LinkProtocol {
 }
 
 impl LinkProtocol {
-    /// The sequence number
-    pub fn seq(&self) -> u64 {
-        match self {
-            LinkProtocol::Reset { .. } => 0,
-            LinkProtocol::Ack { seq, .. } => *seq,
-            LinkProtocol::MsgSlice { seq, .. } => *seq,
-            LinkProtocol::Ping => 0,
-            LinkProtocol::Pong => 0,
-        }
-    }
-
-    /// The total length of data being sent by this sequence.
-    pub fn seq_len(&self) -> u64 {
-        match self {
-            LinkProtocol::Reset { .. } => 0,
-            LinkProtocol::Ack { .. } => 0,
-            LinkProtocol::MsgSlice { seq_len, .. } => *seq_len,
-            LinkProtocol::Ping => 0,
-            LinkProtocol::Pong => 0,
-        }
-    }
-
-    /// The index of the first byte in the slice
-    pub fn first_index(&self) -> u64 {
-        match self {
-            LinkProtocol::Reset { .. } => 0,
-            LinkProtocol::Ack { .. } => 0,
-            LinkProtocol::MsgSlice { first_index, .. } => *first_index,
-            LinkProtocol::Ping => 0,
-            LinkProtocol::Pong => 0,
-        }
-    }
-
-    /// The index of the last byte in the slice
-    pub fn last_index(&self) -> u64 {
-        match self {
-            LinkProtocol::Reset { .. } => 0,
-            LinkProtocol::Ack { last_index, .. } => *last_index,
-            LinkProtocol::MsgSlice {
-                first_index, data, ..
-            } => *first_index + (data.len() as u64) - 1,
-            LinkProtocol::Ping => 0,
-            LinkProtocol::Pong => 0,
-        }
-    }
-
-    /// The data in the slice
-    pub fn data(&self) -> &[u8] {
-        match self {
-            LinkProtocol::Reset { .. } => &[],
-            LinkProtocol::Ack { .. } => &[],
-            LinkProtocol::MsgSlice { data, .. } => data.as_slice(),
-            LinkProtocol::Ping => &[],
-            LinkProtocol::Pong => &[],
-        }
-    }
-
     pub fn serialize(self) -> Vec<u8> {
         match self {
             LinkProtocol::Reset {

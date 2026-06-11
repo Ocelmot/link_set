@@ -8,7 +8,7 @@ const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 use crate::{
     epoch::{Epoch, compare_epochs},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, WrappedLink, connector::PinnedLinkConnector, link_manager::LinkManager},
+    links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager},
     protocol::LinkProtocol,
     state::{
         state::{CommonState, CoreStateState},
@@ -174,11 +174,11 @@ impl CoreStateState for EpochMismatch {
     }
 }
 
-impl StateTransitionWithParamAsync<Disconnected, WrappedLink> for EpochMismatch {
+impl StateTransitionWithParamAsync<Disconnected, LinkEntry> for EpochMismatch {
     async fn transition_from(
         old_state: Box<Disconnected>,
         common: &mut CommonState,
-        link: WrappedLink,
+        link: LinkEntry,
     ) -> Box<EpochMismatch> {
         let mut links = LinkManager::new();
         links.add_link(link);
@@ -198,11 +198,11 @@ impl StateTransitionWithParamAsync<Disconnected, WrappedLink> for EpochMismatch 
     }
 }
 
-impl StateTransitionWithParamAsync<Connecting, WrappedLink> for EpochMismatch {
+impl StateTransitionWithParamAsync<Connecting, LinkEntry> for EpochMismatch {
     async fn transition_from(
         old_state: Box<Connecting>,
         common: &mut CommonState,
-        link: WrappedLink,
+        link: LinkEntry,
     ) -> Box<EpochMismatch> {
         let (conns, addrs) = match old_state.connector.cancel().await {
             Ok((conns, addrs)) => (conns, addrs),

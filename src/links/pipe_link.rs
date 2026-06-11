@@ -17,14 +17,13 @@ use tracing::{debug, trace};
 use crate::{
     deadline::Deadline,
     links::link::{Link, LinkReader},
-    protocol::LinkProtocol,
 };
 
 /// A PipeLinkBuilder sets the configuration for a pair of [PipeLink]s.
 ///
 /// This allows a pair of connected PipeLinks to be created with additional
-/// settings that may be useful for testing. E.g. the link could expire and
-/// close after a certain period of time.
+/// settings that may be useful for testing. E.g. the link can expire and close
+/// after a certain period of time.
 #[derive(Debug, Clone, Copy)]
 pub struct PipeLinkBuilder {
     max_size: u32,
@@ -138,7 +137,7 @@ impl PipeLinkBuilder {
 /// This is primarily useful for testing the rest of the implementation.
 pub struct PipeLink {
     id: u32,
-    tx: Sender<(LinkProtocol, Instant)>,
+    tx: Sender<(Vec<u8>, Instant)>,
     reader: Option<PipeLinkReader>,
     max_size: u32,
     canceler: PipeLinkCanceler,
@@ -212,7 +211,7 @@ pub enum PipeLinkError {
 
 impl Link for PipeLink {
     #[allow(refining_impl_trait)]
-    async fn send(&mut self, msg: LinkProtocol) -> Result<(), PipeLinkError> {
+    async fn send(&mut self, msg: Vec<u8>) -> Result<(), PipeLinkError> {
         let reliability_success = {
             let mut rng = thread_rng();
             self.reliability.sample(&mut rng)
@@ -231,7 +230,7 @@ impl Link for PipeLink {
     }
 
     #[allow(refining_impl_trait)]
-    async fn recv(&mut self) -> PipeLinkResult<LinkProtocol> {
+    async fn recv(&mut self) -> PipeLinkResult<Vec<u8>> {
         let reader = self.reader.as_mut().ok_or(PipeLinkError::ReceiverTaken)?;
         reader.read().await
     }
@@ -272,15 +271,15 @@ impl PipeLinkCanceler {
 
 pub struct PipeLinkReader {
     id: u32,
-    rx: Receiver<(LinkProtocol, Instant)>,
-    peeked: Option<(LinkProtocol, Instant)>,
+    rx: Receiver<(Vec<u8>, Instant)>,
+    peeked: Option<(Vec<u8>, Instant)>,
     expiration: Deadline,
     latency: Option<Duration>,
     cancel_rx: Receiver<()>,
 }
 impl LinkReader for PipeLinkReader {
     #[allow(refining_impl_trait)]
-    async fn read(&mut self) -> PipeLinkResult<LinkProtocol> {
+    async fn read(&mut self) -> PipeLinkResult<Vec<u8>> {
         if let Some((msg, timestamp)) = &self.peeked {
             if let Some(latency) = self.latency {
                 sleep_until(*timestamp + latency).await;
@@ -426,7 +425,7 @@ mod tests {
     #[test_log::test]
     async fn pipe_links_send_recv() {
         let (mut a, mut b) = PipeLink::create_pair();
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone()).await.unwrap();
 
         let recvd_msg = PinnedLink::recv(&mut b).await.unwrap();
@@ -441,7 +440,7 @@ mod tests {
         a.get_canceler().cancel();
 
         // send msg
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone()).await.unwrap();
 
         // test that it was not received
@@ -466,7 +465,7 @@ mod tests {
 
         // send msg
         trace!("sending msg");
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         let _ = PinnedLink::send(&mut a, msg.clone()).await;
 
         // test that it was not received
@@ -489,7 +488,7 @@ mod tests {
         // Send 100 msgs, then close the link
         let send_count = 1000;
         for _ in 0..send_count {
-            let msg = LinkProtocol::Ping;
+            let msg = "test".as_bytes().to_vec();
             PinnedLink::send(&mut a, msg)
                 .await
                 .expect("should be able to send");
@@ -517,7 +516,7 @@ mod tests {
             .create_pair();
 
         sleep(Duration::from_secs(1)).await; // wait for the links to expire
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone())
             .await
             .expect("should be able to send");
@@ -536,7 +535,7 @@ mod tests {
             .create_pair();
 
         sleep(Duration::from_secs(2)).await; // wait for the links to expire
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone())
             .await
             .expect("should be able to send");
@@ -556,7 +555,7 @@ mod tests {
             .latency(Some(Duration::from_millis(latency_ms)))
             .create_pair();
 
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone())
             .await
             .expect("should be able to send");
@@ -596,7 +595,7 @@ mod tests {
             .await
             .expect("listener should return connection");
 
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone()).await.unwrap();
 
         let recvd_msg = PinnedLink::recv(&mut b).await.unwrap();
@@ -625,13 +624,13 @@ mod tests {
             .expect("listener should return connection");
 
         // test that each of the links connects correctly
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone()).await.unwrap();
 
         let recvd_msg = PinnedLink::recv(&mut b).await.unwrap();
         assert_eq!(recvd_msg, msg, "Message was not the same when received");
 
-        let msg2 = LinkProtocol::Pong;
+        let msg2 = "test".as_bytes().to_vec();
         PinnedLink::send(&mut c, msg2.clone()).await.unwrap();
 
         let recvd_msg2 = PinnedLink::recv(&mut d).await.unwrap();
@@ -662,13 +661,13 @@ mod tests {
             .expect("listener should return connection");
 
         // test that each of the links connects correctly
-        let msg = LinkProtocol::Ping;
+        let msg = "test".as_bytes().to_vec();
         PinnedLink::send(&mut a, msg.clone()).await.unwrap();
 
         let recvd_msg = PinnedLink::recv(&mut b).await.unwrap();
         assert_eq!(recvd_msg, msg, "Message was not the same when received");
 
-        let msg2 = LinkProtocol::Pong;
+        let msg2 = "test2".as_bytes().to_vec();
         PinnedLink::send(&mut c, msg2.clone()).await.unwrap();
 
         let recvd_msg2 = PinnedLink::recv(&mut d).await.unwrap();

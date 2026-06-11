@@ -1,13 +1,13 @@
 use crate::{
     LinkSetError, LinkSetResult,
     epoch::Epoch,
-    links::{WrappedLink, wrapped_link::MAX_LATENCY},
+    links::{LinkEntry, link_entry::MAX_LATENCY},
     protocol::LinkProtocol,
     slice_manager::SliceManager,
 };
 
 pub(crate) struct LinkManager {
-    links: Vec<WrappedLink>,
+    links: Vec<LinkEntry>,
 }
 
 impl LinkManager {
@@ -15,11 +15,11 @@ impl LinkManager {
         Self { links: Vec::new() }
     }
 
-    pub fn with_link(link: WrappedLink) -> Self {
+    pub fn with_link(link: LinkEntry) -> Self {
         Self { links: vec![link] }
     }
 
-    pub fn add_link(&mut self, link: WrappedLink) {
+    pub fn add_link(&mut self, link: LinkEntry) {
         self.links.insert(0, link)
     }
 

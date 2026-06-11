@@ -1,8 +1,8 @@
 pub(crate) mod link;
 pub use link::{Link, LinkReader, PinnedLink};
 
-mod wrapped_link;
-pub(crate) use wrapped_link::WrappedLink;
+mod link_entry;
+pub(crate) use link_entry::LinkEntry;
 
 pub(crate) mod connector;
 pub use connector::LinkConnector;

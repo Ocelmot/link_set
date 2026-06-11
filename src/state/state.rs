@@ -7,8 +7,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     LinkSetResult,
     deadline::Deadline,
-    link_set::controller::{LinkSetControl, LinkSetControlCommand, LinkSetControlConfig, LinkSetMessageInner},
-    links::{WrappedLink, link::PinnedLink},
+    link_set::controller::{
+        LinkSetControl, LinkSetControlCommand, LinkSetControlConfig, LinkSetMessageInner,
+    },
+    links::{LinkEntry, link::PinnedLink},
     protocol::LinkProtocol,
     state::states::States,
 };
@@ -57,10 +59,16 @@ impl CommonState {
         }
     }
 
-    pub(crate) fn wrap_link(&mut self, link: Box<dyn PinnedLink>) -> LinkSetResult<WrappedLink> {
+    pub(crate) fn wrap_link(&mut self, link: Box<dyn PinnedLink>) -> LinkSetResult<LinkEntry> {
         let id = self.next_link_id;
         self.next_link_id = self.next_link_id + 1;
-        let mut wrapped = WrappedLink::new(link, id);
+        if link.max_size() <= LinkEntry::OVERHEAD {
+            return Err(crate::LinkSetError::Implementation {
+                size: link.max_size(),
+                required_size: LinkEntry::OVERHEAD,
+            });
+        }
+        let mut wrapped = LinkEntry::new(link, id);
         let reader = wrapped.take_reader()?;
         self.readers.push(reader);
         Ok(wrapped)
@@ -116,7 +124,10 @@ pub(crate) struct CoreState {
 }
 
 impl CoreState {
-    pub(crate) fn new(to_core: Sender<LinkSetControl>, to_ctrl: Sender<LinkSetMessageInner>) -> Self {
+    pub(crate) fn new(
+        to_core: Sender<LinkSetControl>,
+        to_ctrl: Sender<LinkSetMessageInner>,
+    ) -> Self {
         Self {
             common: CommonState::new(to_core, to_ctrl),
             state: States::new().into(),
@@ -131,16 +142,21 @@ impl CoreState {
         &mut self.common.timer
     }
 
-    pub(crate) fn get_refs(&mut self) -> (&mut SelectAll<ReceiverStream<(u64, LinkProtocol)>>, &mut Deadline) {
+    pub(crate) fn get_refs(
+        &mut self,
+    ) -> (
+        &mut SelectAll<ReceiverStream<(u64, LinkProtocol)>>,
+        &mut Deadline,
+    ) {
         (&mut self.common.readers, &mut self.common.timer)
     }
 
-    pub(crate) fn get_state_name(&self) -> &'static str  {
+    pub(crate) fn get_state_name(&self) -> &'static str {
         self.state.get_name()
     }
 
     pub(crate) async fn ctrl_msg(self, msg: LinkSetControl) -> Self {
-        match msg{
+        match msg {
             LinkSetControl::Command(cmd) => self.ctrl_msg_cmd(cmd).await,
             LinkSetControl::Config(conf) => self.ctrl_msg_cfg(conf).await,
         }
@@ -158,9 +174,15 @@ impl CoreState {
     pub(crate) async fn ctrl_msg_cfg(mut self, msg: LinkSetControlConfig) -> Self {
         match msg {
             LinkSetControlConfig::AutoConnect(connect) => self.common.set_auto_connect(connect),
-            LinkSetControlConfig::ConnectTimeout(timeout) => self.common.set_connecting_timeout(timeout),
-            LinkSetControlConfig::ReconnectTimeout(timeout) => self.common.set_reconnecting_timeout(timeout),
-            LinkSetControlConfig::GracePeriod(timeout) => self.common.set_grace_period_timeout(timeout),
+            LinkSetControlConfig::ConnectTimeout(timeout) => {
+                self.common.set_connecting_timeout(timeout)
+            }
+            LinkSetControlConfig::ReconnectTimeout(timeout) => {
+                self.common.set_reconnecting_timeout(timeout)
+            }
+            LinkSetControlConfig::GracePeriod(timeout) => {
+                self.common.set_grace_period_timeout(timeout)
+            }
         }
         self
     }
@@ -198,10 +220,7 @@ pub(crate) trait CoreStateState {
         msg: LinkProtocol,
     ) -> impl Future<Output = States> + Send;
 
-    fn timer(
-        self: Box<Self>,
-        common: &mut CommonState,
-    ) -> impl Future<Output = States> + Send;
+    fn timer(self: Box<Self>, common: &mut CommonState) -> impl Future<Output = States> + Send;
 }
 
 pub(crate) trait PinnedCoreStateState {

@@ -16,7 +16,10 @@ static DEFAULT_LATENCY: Duration = Duration::from_millis(100);
 
 pub(crate) static MAX_LATENCY: Duration = Duration::from_secs(2);
 
-pub(crate) struct WrappedLink {
+/// This holds the link in the link manager. It adds metadata like latency, as
+/// well as handling the serialization and deserialization to and from the
+/// Link's Vec<u8>
+pub(crate) struct LinkEntry {
     /// Identify this link from the others
     id: u64,
     /// The wrapped link
@@ -27,7 +30,10 @@ pub(crate) struct WrappedLink {
     recent: VecDeque<Duration>,
 }
 
-impl WrappedLink {
+impl LinkEntry {
+    // LinkEntry takes 49b, use 56 to give extra space.
+    pub(crate) const OVERHEAD: u32 = 56;
+
     pub fn new<L: Into<Box<dyn PinnedLink>>>(link: L, id: u64) -> Self {
         let link = link.into();
         let mut recent = VecDeque::with_capacity(HISTORY_LEN + 1);
@@ -51,11 +57,11 @@ impl WrappedLink {
         // end the previous ping if there was one.
         self.end_ping();
         self.ping = Some(Instant::now());
-        self.link.send(LinkProtocol::Ping).await
+        self.send(LinkProtocol::Ping).await
     }
 
     pub async fn send_pong(&mut self) -> LinkSetResult {
-        self.link.send(LinkProtocol::Pong).await
+        self.send(LinkProtocol::Pong).await
     }
 
     pub fn end_ping(&mut self) {
@@ -88,6 +94,10 @@ impl WrappedLink {
                 let Ok(proto) = reader.read().await else {
                     return;
                 };
+                let mut data = VecDeque::from(proto);
+                let Ok(proto) = LinkProtocol::deserialize(&mut data) else{
+                    return;
+                };
                 if tx.send((id, proto)).await.is_err() {
                     return;
                 }
@@ -98,15 +108,18 @@ impl WrappedLink {
     }
 
     pub(crate) async fn send(&mut self, msg: LinkProtocol) -> LinkSetResult {
-        self.link.send(msg).await
+        self.link.send(msg.serialize()).await
     }
 
     pub(crate) async fn recv(&mut self) -> LinkSetResult<LinkProtocol> {
-        self.link.recv().await
+        let data = self.link.recv().await?;
+        let mut data = VecDeque::from(data);
+        LinkProtocol::deserialize(&mut data)
     }
 
     pub(crate) fn max_size(&self) -> u32 {
-        self.link.max_size()
+        // minus the overhead for the serialization
+        self.link.max_size().saturating_sub(Self::OVERHEAD)
     }
 
     pub(crate) fn is_closed(&mut self) -> bool {
