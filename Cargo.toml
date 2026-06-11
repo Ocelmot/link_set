@@ -5,6 +5,8 @@ edition = "2024"
 
 [features]
 serde = ["dep:serde", "dep:bincode"]
+pipe_link = []
+tcp_link = []
 
 [dependencies]
 thiserror = "2.0.17"
@@ -21,4 +23,5 @@ bincode = {version = "2.0.1", optional = true, features = ["serde"]}
 
 
 [dev-dependencies]
+link_set = { path = ".", features = ["pipe_link"] }
 test-log = {version = "0.2", features = ["trace"]}

@@ -229,8 +229,7 @@ impl Link for PipeLink {
         Ok(())
     }
 
-    #[allow(refining_impl_trait)]
-    async fn recv(&mut self) -> PipeLinkResult<Vec<u8>> {
+    async fn recv(&mut self) -> Result<Vec<u8>, impl std::error::Error + std::marker::Send + Sync + 'static> {
         let reader = self.reader.as_mut().ok_or(PipeLinkError::ReceiverTaken)?;
         reader.read().await
     }
@@ -280,19 +279,19 @@ pub struct PipeLinkReader {
 impl LinkReader for PipeLinkReader {
     #[allow(refining_impl_trait)]
     async fn read(&mut self) -> PipeLinkResult<Vec<u8>> {
-        if let Some((msg, timestamp)) = &self.peeked {
+        if let Some((msg, timestamp)) = self.peeked.take() {
             if let Some(latency) = self.latency {
-                sleep_until(*timestamp + latency).await;
+                sleep_until(timestamp + latency).await;
             }
             let msg = msg.clone();
             self.peeked = None;
             if self.expiration.is_elapsed() {
                 debug!("Pipe {}: expired", self.id);
                 self.rx.close();
-                return Err(PipeLinkError::Closed);
+                return Err(PipeLinkError::Closed)
             } else {
                 debug!("Pipe {}: read msg {:?}", self.id, msg);
-                return Ok(msg);
+                return Ok(msg)
             }
         }
 

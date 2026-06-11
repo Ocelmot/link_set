@@ -250,6 +250,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "futures",
+ "link_set",
  "rand",
  "serde",
  "test-log",

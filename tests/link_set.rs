@@ -14,7 +14,8 @@ use std::time::Duration;
 ///  - Test that messages are resent when parts are dropped
 use link_set::{
     LinkSet, LinkSetMessage, LinkSetSendable,
-    links::{Address, PipeLinkBuilder, PipeLinkHub},
+    links::Address,
+    link_impls::{PipeLinkBuilder, PipeLinkHub},
 };
 use tokio::time::sleep;
 use tracing::trace;
