@@ -9,7 +9,6 @@ pub trait Link: Send + Sync {
     /// This must be read by the other side with the same chunk boundaries. Ten
     /// bytes sent may not become two five byte reads. However, order of arrival
     /// or guarantee of delivery are not required.
-    #[allow(refining_impl_trait)]
     fn send(
         &mut self,
         msg: Vec<u8>,
@@ -20,14 +19,29 @@ pub trait Link: Send + Sync {
     /// This must be read with the same chunk boundaries as were sent by the
     /// other side. Ten bytes sent may not become two five byte reads. However,
     /// order of arrival or guarantee of delivery are not required.
-    #[allow(refining_impl_trait)]
+    ///
+    /// Returning an error from this function should indicate that further
+    /// retries will also fail. Transient errors should not propagate.
     fn recv(
         &mut self,
     ) -> impl Future<Output = Result<Vec<u8>, impl std::error::Error + Send + Sync + 'static>> + Send;
 
+    /// Close this link
+    ///
+    /// This allows the underlying implementation to close and clean up its
+    /// resources. If the link had its reader taken, the reader may or may not
+    /// also close. If this function is not implemented, cleanup will be assumed
+    /// to be done on drop. If this function is called, future calls to
+    /// send/recv should indicate the link is closed.
+    fn close(
+        &mut self,
+    ) -> impl Future<Output = Result<(), impl std::error::Error + Send + Sync + 'static>> + Send
+    {
+        async { LinkSetResult::Ok(()) }
+    }
+
     /// Returns a Receiver of [Vec<u8>]s that will fill with items from the
     /// Link.
-    #[allow(refining_impl_trait)]
     fn take_reader(
         &mut self,
     ) -> Result<impl LinkReader + 'static, impl std::error::Error + Send + Sync + 'static>;

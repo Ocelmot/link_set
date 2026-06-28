@@ -15,3 +15,4 @@ mod slice_manager;
 mod state;
 
 pub mod link_impls;
+pub mod adaptors;
