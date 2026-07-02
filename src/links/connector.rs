@@ -7,7 +7,7 @@ use crate::{
 
 pub trait LinkConnector: Send + Sync + 'static{
     fn scheme(&self) -> &'static str;
-    fn connect(&mut self, addr: String) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>> + Send + Sync;
+    fn connect(&mut self, addr: String) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>> + Send;
 }
 
 // Link connector is implemented for async functions that match its signature
@@ -30,7 +30,7 @@ pub(crate) trait PinnedLinkConnector: Sync + Send {
     fn connect<'a>(
         &'a mut self,
         addr: String,
-    ) ->  Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + Sync + 'a>> ;
+    ) ->  Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>> ;
 }
 
 // PinnedLinkConnector is implemented for all LinkConnectors
@@ -39,7 +39,7 @@ impl<LC: LinkConnector> PinnedLinkConnector for LC {
     fn connect<'a>(
         &'a mut self,
         addr: String,
-    ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + Sync + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>> {
         let x = async {
             let link = self.connect(addr).await.map_err(|e| crate::LinkSetError::LinkError(Box::new(e)))?;
             LinkSetResult::Ok(Box::new(link) as Box<dyn PinnedLink>)
