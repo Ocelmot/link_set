@@ -82,14 +82,10 @@ impl LinkProtocol {
                 ret
             }
             LinkProtocol::Ping => {
-                let mut ret = Vec::with_capacity(1);
-                ret.push(3);
-                ret
+                vec![3]
             }
             LinkProtocol::Pong => {
-                let mut ret = Vec::with_capacity(1);
-                ret.push(4);
-                ret
+                vec![4]
             }
         }
     }

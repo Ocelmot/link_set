@@ -6,17 +6,10 @@ use tracing::{error, trace, warn};
 const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 
 use crate::{
-    epoch::{Epoch, compare_epochs},
-    link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager},
-    protocol::LinkProtocol,
-    state::{
-        state::{CommonState, CoreStateState},
-        states::{
-            StateTransitionFromAsync, StateTransitionWithParamAsync, States, connected::Connected,
-            connecting::Connecting, disconnected::Disconnected, to_state_async,
-            to_state_param_async,
-        },
+    epoch::{Epoch, compare_epochs}, link_set::controller::{LinkSetControlCommand, LinkSetMessageInner}, links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager}, protocol::LinkProtocol, state::{
+        State, common::CommonState, states::{
+            States, connected::Connected, connecting::Connecting, disconnected::Disconnected,
+        }, transition::{StateTransitionFromAsync, StateTransitionWithParamAsync, to_state_async, to_state_param_async},
     },
 };
 
@@ -32,7 +25,7 @@ pub(crate) struct EpochMismatch {
     pub(crate) last_ping: Instant,
 }
 
-impl CoreStateState for EpochMismatch {
+impl State for EpochMismatch {
     async fn ctrl_msg(
         mut self: Box<Self>,
         common: &mut CommonState,
@@ -61,7 +54,9 @@ impl CoreStateState for EpochMismatch {
             LinkSetControlCommand::AddConnector(conn) => {
                 let scheme = conn.scheme();
                 if self.conns.insert(scheme.to_string(), conn).is_some() {
-                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                    warn!(
+                        "Connector list already contained connector for scheme `{scheme}`! The connector has been replaced."
+                    );
                 }
 
                 self.into()
@@ -185,7 +180,9 @@ impl StateTransitionWithParamAsync<Disconnected, LinkEntry> for EpochMismatch {
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
 
-        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        common
+            .get_timer()
+            .modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns: old_state.conns,
@@ -218,9 +215,14 @@ impl StateTransitionWithParamAsync<Connecting, LinkEntry> for EpochMismatch {
         links.ping_all().await;
         let _ = links.reset(old_state.epoch, true).await;
 
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(false))
+            .await;
 
-        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        common
+            .get_timer()
+            .modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns,
@@ -234,14 +236,13 @@ impl StateTransitionWithParamAsync<Connecting, LinkEntry> for EpochMismatch {
 }
 
 impl StateTransitionFromAsync<Connected> for EpochMismatch {
-    async fn transition_from(
-        mut old_state: Box<Connected>,
-        common: &mut CommonState,
-    ) -> Box<Self> {
+    async fn transition_from(mut old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
         let epoch = Some(old_state.epoch.increment());
         let _ = old_state.links.reset(epoch, true).await;
 
-        common.get_timer().modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
+        common
+            .get_timer()
+            .modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
 
         Box::new(EpochMismatch {
             conns: old_state.conns,

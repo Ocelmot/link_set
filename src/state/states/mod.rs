@@ -1,5 +1,5 @@
 use crate::state::{
-    state::{CommonState, PinnedCoreStateState},
+    PinnedState,
     states::{
         connected::Connected, connecting::Connecting, disconnected::Disconnected,
         epoch_mismatch::EpochMismatch, grace_period::GracePeriod, reconnecting::Reconnecting,
@@ -13,69 +13,6 @@ pub(crate) mod epoch_mismatch;
 pub(crate) mod grace_period;
 pub(crate) mod reconnecting;
 
-// Create a new state from an old state
-pub(crate) trait StateTransitionFrom<F> {
-    fn transition_from(old_state: Box<F>, common: &mut CommonState) -> Box<Self>;
-}
-
-pub(crate) fn to_state<T, F>(from: Box<F>, common: &mut CommonState) -> States
-where
-    T: StateTransitionFrom<F>,
-    Box<T>: Into<States>,
-{
-    T::transition_from(from, common).into()
-}
-
-// Create a new state from an old state (Async)
-pub(crate) trait StateTransitionFromAsync<F> {
-    fn transition_from(
-        old_state: Box<F>,
-        common: &mut CommonState,
-    ) -> impl Future<Output = Box<Self>>;
-}
-
-pub(crate) async fn to_state_async<T, F>(from: Box<F>, common: &mut CommonState) -> States
-where
-    T: StateTransitionFromAsync<F>,
-    Box<T>: Into<States>,
-{
-    T::transition_from(from, common).await.into()
-}
-
-// Create a new state from an old state and some parameters
-pub(crate) trait StateTransitionWithParam<F, P> {
-    fn transition_from(old_state: Box<F>, common: &mut CommonState, param: P) -> Box<Self>;
-}
-
-pub(crate) fn to_state_param<T, F, P>(from: Box<F>, common: &mut CommonState, param: P) -> States
-where
-    T: StateTransitionWithParam<F, P>,
-    Box<T>: Into<States>,
-{
-    T::transition_from(from, common, param).into()
-}
-
-// Create a new state from an old state and some parameters (async)
-pub(crate) trait StateTransitionWithParamAsync<F, P> {
-    fn transition_from(
-        old_state: Box<F>,
-        common: &mut CommonState,
-        param: P,
-    ) -> impl Future<Output = Box<Self>>;
-}
-
-pub(crate) async fn to_state_param_async<T, F, P>(
-    from: Box<F>,
-    common: &mut CommonState,
-    param: P,
-) -> States
-where
-    T: StateTransitionWithParamAsync<F, P>,
-    Box<T>: Into<States>,
-{
-    T::transition_from(from, common, param).await.into()
-}
-
 pub(crate) enum States {
     Disconnected(Box<Disconnected>),
     Connecting(Box<Connecting>),
@@ -86,7 +23,7 @@ pub(crate) enum States {
 }
 
 impl States {
-    pub fn to_boxed(self) -> Box<dyn PinnedCoreStateState> {
+    pub fn into_boxed_inner(self) -> Box<dyn PinnedState> {
         match self {
             Self::Disconnected(disconnected) => disconnected,
             Self::Connecting(connecting) => connecting,

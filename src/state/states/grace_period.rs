@@ -9,11 +9,10 @@ use crate::{
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
-        state::{CommonState, CoreStateState},
-        states::{
-            StateTransitionFrom, connected::Connected, connecting::Connecting,
-            disconnected::Disconnected, to_state_async, to_state_param_async,
-        },
+        State,
+        common::CommonState,
+        states::{connected::Connected, connecting::Connecting, disconnected::Disconnected},
+        transition::{StateTransitionFrom, to_state_async, to_state_param_async},
     },
 };
 
@@ -27,7 +26,7 @@ pub(crate) struct GracePeriod {
     pub(crate) epoch: Epoch,
 }
 
-impl CoreStateState for GracePeriod {
+impl State for GracePeriod {
     async fn ctrl_msg(
         mut self: Box<Self>,
         common: &mut CommonState,
@@ -42,7 +41,9 @@ impl CoreStateState for GracePeriod {
                 trace!("LinkSetCore adding connector");
                 let scheme = conn.scheme();
                 if self.conns.insert(scheme.to_string(), conn).is_some() {
-                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                    warn!(
+                        "Connector list already contained connector for scheme `{scheme}`! The connector has been replaced."
+                    );
                 }
 
                 self.into()
@@ -60,10 +61,10 @@ impl CoreStateState for GracePeriod {
             },
             LinkSetControlCommand::Message(data, epoch) => {
                 // make sure the epoch matches the current state
-                if let Some(epoch) = epoch {
-                    if self.epoch != epoch {
-                        return self.into();
-                    }
+                if let Some(epoch) = epoch
+                    && self.epoch != epoch
+                {
+                    return self.into();
                 }
 
                 self.msg_mgr.insert_msg(data);
@@ -75,7 +76,7 @@ impl CoreStateState for GracePeriod {
 
     async fn link_msg(
         mut self: Box<Self>,
-        common: &mut crate::state::state::CommonState,
+        common: &mut crate::state::common::CommonState,
         _id: u64,
         msg: crate::protocol::LinkProtocol,
     ) -> super::States {

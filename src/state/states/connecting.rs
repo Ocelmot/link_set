@@ -1,24 +1,11 @@
 use tracing::trace;
 
 use crate::{
-    connector_manager::ConnectorManager,
-    epoch::Epoch,
-    link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    protocol::LinkProtocol,
-    state::{
-        state::{CommonState, CoreStateState},
-        states::{
-            StateTransitionFromAsync,
-            StateTransitionWithParamAsync,
-            States,
-            connected::Connected,
-            disconnected::Disconnected,
-            epoch_mismatch::EpochMismatch,
-            grace_period::GracePeriod,
-            reconnecting::Reconnecting,
-            to_state_async,
-            to_state_param_async,
-        },
+    connector_manager::ConnectorManager, epoch::Epoch, link_set::controller::{LinkSetControlCommand, LinkSetMessageInner}, protocol::LinkProtocol, state::{
+        State, common::CommonState, states::{
+            States, connected::Connected, disconnected::Disconnected,
+            epoch_mismatch::EpochMismatch, grace_period::GracePeriod, reconnecting::Reconnecting,
+        }, transition::{StateTransitionFromAsync, StateTransitionWithParamAsync, to_state_async, to_state_param_async},
     },
 };
 
@@ -28,7 +15,7 @@ pub(crate) struct Connecting {
     pub(crate) epoch: Option<Epoch>,
 }
 
-impl CoreStateState for Connecting {
+impl State for Connecting {
     async fn ctrl_msg(
         mut self: Box<Self>,
         common: &mut CommonState,
@@ -87,18 +74,24 @@ impl CoreStateState for Connecting {
     }
 }
 
-fn determine_timer(common: &mut CommonState){
-    if let Some(timeout) = common.connecting_timeout().clone() {
+fn determine_timer(common: &mut CommonState) {
+    if let Some(timeout) = *common.connecting_timeout() {
         common.get_timer().clear_repeat();
         common.get_timer().modify_deadline_from_now(timeout);
-    }else{
+    } else {
         common.get_timer().clear();
     }
 }
 
 impl StateTransitionFromAsync<Disconnected> for Connecting {
-    async fn transition_from(old_state: Box<Disconnected>, common: &mut CommonState) -> Box<Connecting> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+    async fn transition_from(
+        old_state: Box<Disconnected>,
+        common: &mut CommonState,
+    ) -> Box<Connecting> {
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
         determine_timer(common);
 
         let to_core = common.get_to_core().clone();
@@ -116,9 +109,12 @@ impl StateTransitionWithParamAsync<Disconnected, Vec<u8>> for Connecting {
         common: &mut CommonState,
         msg: Vec<u8>,
     ) -> Box<Connecting> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
         determine_timer(common);
-        
+
         let to_core = common.get_to_core().clone();
         Box::new(Connecting {
             connector: ConnectorManager::start(to_core, old_state.addrs, old_state.conns),
@@ -130,7 +126,10 @@ impl StateTransitionWithParamAsync<Disconnected, Vec<u8>> for Connecting {
 
 impl StateTransitionFromAsync<EpochMismatch> for Connecting {
     async fn transition_from(old_state: Box<EpochMismatch>, common: &mut CommonState) -> Box<Self> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
         determine_timer(common);
 
         let to_core = common.get_to_core().clone();
@@ -144,7 +143,10 @@ impl StateTransitionFromAsync<EpochMismatch> for Connecting {
 
 impl StateTransitionFromAsync<Connected> for Connecting {
     async fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
         determine_timer(common);
 
         let to_core = common.get_to_core().clone();
@@ -160,7 +162,10 @@ impl StateTransitionFromAsync<Reconnecting> for Connecting {
     async fn transition_from(old_state: Box<Reconnecting>, common: &mut CommonState) -> Box<Self> {
         determine_timer(common);
 
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::Disconnected).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::Disconnected)
+            .await;
         Box::new(Connecting {
             connector: old_state.connector,
             queued_msgs: Vec::new(),
@@ -171,8 +176,14 @@ impl StateTransitionFromAsync<Reconnecting> for Connecting {
 
 impl StateTransitionFromAsync<GracePeriod> for Connecting {
     async fn transition_from(old_state: Box<GracePeriod>, common: &mut CommonState) -> Box<Self> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::Disconnected).await;
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::Disconnected)
+            .await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
 
         determine_timer(common);
 

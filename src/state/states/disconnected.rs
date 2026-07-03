@@ -8,12 +8,13 @@ use crate::{
     links::{Address, connector::PinnedLinkConnector},
     protocol::LinkProtocol,
     state::{
-        state::{CommonState, CoreStateState},
+        State,
+        common::CommonState,
         states::{
-            StateTransitionFromAsync, States, connected::Connected, connecting::Connecting,
-            epoch_mismatch::EpochMismatch, grace_period::GracePeriod, reconnecting::Reconnecting,
-            to_state_async, to_state_param_async,
+            States, connected::Connected, connecting::Connecting, epoch_mismatch::EpochMismatch,
+            grace_period::GracePeriod, reconnecting::Reconnecting,
         },
+        transition::{StateTransitionFromAsync, to_state_async, to_state_param_async},
     },
 };
 
@@ -37,7 +38,7 @@ impl Disconnected {
     }
 }
 
-impl CoreStateState for Disconnected {
+impl State for Disconnected {
     async fn ctrl_msg(
         mut self: Box<Self>,
         common: &mut CommonState,
@@ -50,7 +51,9 @@ impl CoreStateState for Disconnected {
                 trace!("LinkSetCore adding connector");
                 let scheme = conn.scheme();
                 if self.conns.insert(scheme.to_string(), conn).is_some() {
-                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                    warn!(
+                        "Connector list already contained connector for scheme `{scheme}`! The connector has been replaced."
+                    );
                 }
 
                 self.into()
@@ -70,9 +73,11 @@ impl CoreStateState for Disconnected {
                 // message should trigger connection, if we are able to connect,
                 // otherwise discard if message has an epoch, it cannot be
                 // correct since we are disconnected
-                if common.auto_connect() && epoch.is_none(){
-                    if self.conns.is_empty(){
-                        warn!("Attempting connection with no connectors. Make sure to add a connector.");
+                if common.auto_connect() && epoch.is_none() {
+                    if self.conns.is_empty() {
+                        warn!(
+                            "Attempting connection with no connectors. Make sure to add a connector."
+                        );
                     }
                     to_state_param_async::<Connecting, _, _>(self, common, data).await
                 } else {
@@ -90,7 +95,7 @@ impl CoreStateState for Disconnected {
     ) -> States {
         // There should be no incoming messages while disconnected, clear the
         // readers as a precaution
-        common.clear_readers();
+        common.get_readers_mut().clear();
         self.into()
     }
 
@@ -115,7 +120,10 @@ impl StateTransitionFromAsync<Connecting> for Disconnected {
             }
         };
         common.get_timer().clear();
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(false))
+            .await;
         Box::new(Disconnected {
             conns,
             addrs,
@@ -168,7 +176,10 @@ impl StateTransitionFromAsync<Reconnecting> for Disconnected {
                 (HashMap::new(), Vec::new())
             }
         };
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(false))
+            .await;
         let _ = common
             .get_to_ctrl()
             .send(LinkSetMessageInner::Disconnected)

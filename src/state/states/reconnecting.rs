@@ -1,22 +1,11 @@
 use tracing::trace;
 
 use crate::{
-    connector_manager::ConnectorManager,
-    epoch::Epoch,
-    link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    message_manager::MessageManager,
-    protocol::LinkProtocol,
-    state::{
-        state::{CommonState, CoreStateState},
-        states::{
-            StateTransitionFromAsync,
-            States,
-            connected::Connected,
-            connecting::Connecting,
+    connector_manager::ConnectorManager, epoch::Epoch, link_set::controller::{LinkSetControlCommand, LinkSetMessageInner}, message_manager::MessageManager, protocol::LinkProtocol, state::{
+        State, common::CommonState, states::{
+            States, connected::Connected, connecting::Connecting,
             disconnected::Disconnected,
-            to_state_async,
-            to_state_param_async,
-        },
+        }, transition::{StateTransitionFromAsync, to_state_async, to_state_param_async},
     },
 };
 
@@ -26,10 +15,10 @@ pub(crate) struct Reconnecting {
     pub(crate) connector: ConnectorManager,
 }
 
-impl CoreStateState for Reconnecting {
+impl State for Reconnecting {
     async fn ctrl_msg(
         mut self: Box<Self>,
-        common: &mut crate::state::state::CommonState,
+        common: &mut crate::state::common::CommonState,
         msg: LinkSetControlCommand,
     ) -> States {
         match msg {
@@ -58,10 +47,10 @@ impl CoreStateState for Reconnecting {
                 }
             }
             LinkSetControlCommand::Message(data, epoch) => {
-                if let Some(epoch) = epoch {
-                    if self.epoch != epoch {
-                        return self.into();
-                    }
+                if let Some(epoch) = epoch
+                    && self.epoch != epoch
+                {
+                    return self.into();
                 }
                 self.msg_mgr.insert_msg(data);
                 self.into()
@@ -71,7 +60,7 @@ impl CoreStateState for Reconnecting {
 
     async fn link_msg(
         mut self: Box<Self>,
-        common: &mut crate::state::state::CommonState,
+        common: &mut crate::state::common::CommonState,
         _id: u64,
         msg: crate::protocol::LinkProtocol,
     ) -> States {
@@ -146,7 +135,10 @@ impl CoreStateState for Reconnecting {
 
 impl StateTransitionFromAsync<Connected> for Reconnecting {
     async fn transition_from(old_state: Box<Connected>, common: &mut CommonState) -> Box<Self> {
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(true)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(true))
+            .await;
 
         if let Some(timeout) = common.reconnecting_timeout().clone() {
             common.get_timer().modify_deadline_from_now(timeout);

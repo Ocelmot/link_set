@@ -45,7 +45,7 @@ impl MessageManager {
     }
 
     pub fn get_outgoing_slices(&self) -> impl Iterator<Item = &SliceManager> {
-        self.outgoing_slices.iter().map(|(_, v)| v)
+        self.outgoing_slices.values()
     }
 
     pub fn recv_ack(&mut self, ack: (u64, u64)) {
@@ -105,8 +105,8 @@ impl MessageManager {
         // if it updates, it should update as far forward as it can
 
         let mut did_change = false;
-        let mut iter = self.incoming_slices.range(seq..);
-        while let Some((seq, slice_mgr)) = iter.next() {
+
+        for (seq, slice_mgr) in self.incoming_slices.range(seq..) {
             trace!("updating last_ack, entry seq = {:?}", seq);
             
             // Detect if this is discontinuous with previous

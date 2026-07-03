@@ -105,11 +105,12 @@ impl Future for Deadline {
 
 impl Clone for Deadline {
     fn clone(&self) -> Self {
-        let deadline = match &self.deadline {
-            Some(sleep) => Some(Box::pin(sleep_until(sleep.deadline()))),
-            None => None,
-        };
-        let repeat = self.repeat.clone();
-        Self { deadline, repeat }
+        Self {
+            deadline: self
+            .deadline
+            .as_ref()
+            .map(|sleep| Box::pin(sleep_until(sleep.deadline()))),
+            repeat: self.repeat,
+        }
     }
 }

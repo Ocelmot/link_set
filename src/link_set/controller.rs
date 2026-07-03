@@ -235,7 +235,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// Add a new boxed link to the LinkSet
     pub async fn add_link_boxed(&self, link: Box<dyn PinnedLink>) -> LinkSetResult{
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(link.into())))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(link)))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -311,6 +311,12 @@ impl<M: LinkSetSendable> LinkSet<M> {
             state: None,
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<M: LinkSetSendable> Default for LinkSet<M> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

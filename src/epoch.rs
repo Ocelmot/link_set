@@ -9,7 +9,7 @@ impl Epoch {
     pub const ONE: Epoch = Epoch(NonZero::new(1).unwrap());
 
     pub(crate) fn from_int(value: u64) -> Option<Self> {
-        NonZero::new(value).map(|x| Epoch(x))
+        NonZero::new(value).map(Epoch)
     }
 
     pub(crate) fn to_int(&self) -> u64 {

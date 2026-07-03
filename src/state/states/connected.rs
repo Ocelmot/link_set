@@ -10,12 +10,13 @@ use crate::{
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
-        state::{CommonState, CoreStateState},
+        State,
+        common::CommonState,
         states::{
-            StateTransitionWithParamAsync, States, disconnected::Disconnected,
-            epoch_mismatch::EpochMismatch, grace_period::GracePeriod, reconnecting::Reconnecting,
-            to_state, to_state_async,
+            States, disconnected::Disconnected, epoch_mismatch::EpochMismatch,
+            grace_period::GracePeriod, reconnecting::Reconnecting,
         },
+        transition::{StateTransitionWithParamAsync, to_state, to_state_async},
     },
 };
 
@@ -66,7 +67,7 @@ impl Connected {
     }
 }
 
-impl CoreStateState for Connected {
+impl State for Connected {
     async fn ctrl_msg(
         mut self: Box<Self>,
         common: &mut CommonState,
@@ -81,7 +82,9 @@ impl CoreStateState for Connected {
                 trace!("LinkSetCore adding connector");
                 let scheme = conn.scheme();
                 if self.conns.insert(scheme.to_string(), conn).is_some() {
-                    warn!("Connector list already contained connector for scheme `{scheme}`! The connector has been replaced.");
+                    warn!(
+                        "Connector list already contained connector for scheme `{scheme}`! The connector has been replaced."
+                    );
                 }
 
                 self.into()
@@ -98,10 +101,10 @@ impl CoreStateState for Connected {
             }
             LinkSetControlCommand::Message(msg, epoch) => {
                 // make sure the epoch matches the current state
-                if let Some(epoch) = epoch {
-                    if self.epoch != epoch {
-                        return self.into();
-                    }
+                if let Some(epoch) = epoch
+                    && self.epoch != epoch
+                {
+                    return self.into();
                 }
 
                 let seq = self.msg_mgr.insert_msg(msg);
@@ -258,7 +261,10 @@ impl StateTransitionWithParamAsync<Reconnecting, LinkEntry> for Connected {
         let mut links = LinkManager::with_link(link);
         links.ping_all().await;
 
-        let _ = common.get_to_ctrl().send(LinkSetMessageInner::AttemptingConnection(false)).await;
+        let _ = common
+            .get_to_ctrl()
+            .send(LinkSetMessageInner::AttemptingConnection(false))
+            .await;
 
         common.get_timer().clear();
         common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);

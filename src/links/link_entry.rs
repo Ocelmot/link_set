@@ -77,7 +77,7 @@ impl LinkEntry {
     }
 
     pub fn latency(&self) -> Duration {
-        if self.recent.len() == 0 {
+        if self.recent.is_empty() {
             // If connection has not been used, assume default latency
             return DEFAULT_LATENCY;
         }
@@ -109,12 +109,6 @@ impl LinkEntry {
 
     pub(crate) async fn send(&mut self, msg: LinkProtocol) -> LinkSetResult {
         self.link.send(msg.serialize()).await
-    }
-
-    pub(crate) async fn recv(&mut self) -> LinkSetResult<LinkProtocol> {
-        let data = self.link.recv().await?;
-        let mut data = VecDeque::from(data);
-        LinkProtocol::deserialize(&mut data)
     }
 
     pub(crate) fn max_size(&self) -> u32 {

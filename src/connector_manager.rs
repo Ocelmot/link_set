@@ -61,7 +61,7 @@ impl ConnectorManager {
 
                 }
             }
-            return (conns, addrs);
+            (conns, addrs)
         });
 
         Self {
