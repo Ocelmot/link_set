@@ -1,11 +1,19 @@
 use tracing::trace;
 
 use crate::{
-    connector_manager::ConnectorManager, epoch::Epoch, link_set::controller::{LinkSetControlCommand, LinkSetMessageInner}, message_manager::MessageManager, protocol::LinkProtocol, state::{
-        State, common::CommonState, states::{
-            States, connected::Connected, connecting::Connecting,
-            disconnected::Disconnected,
-        }, transition::{StateTransitionFromAsync, to_state_async, to_state_param_async},
+    connector_manager::ConnectorManager,
+    debug::{DebugCommand, DebugReplySnapshot},
+    epoch::Epoch,
+    link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
+    message_manager::MessageManager,
+    protocol::LinkProtocol,
+    state::{
+        State,
+        common::CommonState,
+        states::{
+            States, connected::Connected, connecting::Connecting, disconnected::Disconnected,
+        },
+        transition::{StateTransitionFromAsync, to_state_async, to_state_param_async},
     },
 };
 
@@ -130,6 +138,33 @@ impl State for Reconnecting {
         } else {
             to_state_async::<Disconnected, _>(self, common).await
         }
+    }
+
+    async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
+        let epoch = self.epoch;
+        let (addrs, conns) = self
+            .connector
+            .debug_request_snapshot()
+            .await
+            .map(|snap| (snap.addrs, snap.connectors))
+            .unwrap_or_default();
+        let states = States::from(self);
+        match cmd {
+            DebugCommand::Snapshot(sender) => {
+                let reply = DebugReplySnapshot {
+                    state_name: states.get_name().to_owned(),
+                    epoch: Some(epoch),
+                    addrs,
+                    connectors: conns,
+                    links: vec![],
+                };
+                let _ = sender.send(reply);
+            }
+            DebugCommand::EvictLink(sender, _id) => {
+                let _ = sender.send(false); // disconnected has no links
+            }
+        }
+        states
     }
 }
 

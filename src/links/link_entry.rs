@@ -53,6 +53,10 @@ impl LinkEntry {
         self.id
     }
 
+    pub fn scheme(&self) -> &'static str {
+        self.link.scheme()
+    }
+
     pub async fn send_ping(&mut self) -> LinkSetResult {
         // end the previous ping if there was one.
         self.end_ping();

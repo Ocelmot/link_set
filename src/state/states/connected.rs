@@ -4,6 +4,7 @@ use tokio::time::Instant;
 use tracing::{error, trace, warn};
 
 use crate::{
+    debug::{DebugCommand, DebugReplySnapshot, LinkDescription},
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
     links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager},
@@ -206,6 +207,43 @@ impl State for Connected {
         }
 
         self.determine_state(common).await
+    }
+
+    async fn debug(mut self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
+        match cmd {
+            DebugCommand::Snapshot(sender) => {
+                let links = {
+                    let mut descriptions = self
+                        .links
+                        .link_entries()
+                        .map(|entry| LinkDescription {
+                            id: entry.id(),
+                            scheme: entry.scheme().to_string(),
+                        })
+                        .collect::<Vec<_>>();
+                    descriptions.sort_by(|a, b| a.id.cmp(&b.id));
+                    descriptions
+                };
+                let epoch = self.epoch;
+                let addrs = self.addrs.iter().map(|a| a.0.clone()).collect();
+                let conns = self.conns.iter().map(|c| c.1.scheme()).collect();
+                let states = States::from(self);
+                let reply = DebugReplySnapshot {
+                    state_name: states.get_name().to_owned(),
+                    epoch: Some(epoch),
+                    addrs,
+                    connectors: conns,
+                    links,
+                };
+                let _ = sender.send(reply);
+                states
+            }
+            DebugCommand::EvictLink(sender, id) => {
+                self.links.evict_link(id);
+                let _ = sender.send(true);
+                self.into()
+            }
+        }
     }
 }
 

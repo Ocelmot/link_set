@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tracing::{error, trace, warn};
 
 use crate::{
+    debug::{DebugCommand, DebugReplySnapshot},
     epoch::{Epoch, opt_epoch_increment},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
     links::{Address, connector::PinnedLinkConnector},
@@ -103,6 +104,29 @@ impl State for Disconnected {
         // Disconnected should never need a timer, so disable it if it occurs
         common.get_timer().clear();
         self.into()
+    }
+
+    async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
+        let epoch = self.epoch;
+        let addrs = self.addrs.iter().map(|a|a.0.clone()).collect();
+        let conns = self.conns.iter().map(|c|c.1.scheme()).collect();
+        let states = States::from(self);
+        match cmd {
+            DebugCommand::Snapshot(sender) => {
+                let reply = DebugReplySnapshot {
+                    state_name: states.get_name().to_owned(),
+                    epoch,
+                    addrs,
+                    connectors: conns,
+                    links: vec![],
+                };
+                let _ = sender.send(reply);
+            }
+            DebugCommand::EvictLink(sender, _id ) => {
+                let _ = sender.send(false); // disconnected has no links
+            }
+        }
+        states
     }
 }
 

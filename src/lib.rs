@@ -13,6 +13,8 @@ mod message_manager;
 mod protocol;
 mod slice_manager;
 mod state;
+mod debug;
+pub use debug::{DebugHandle, DebugReplySnapshot};
 
 pub mod link_impls;
 pub mod adaptors;

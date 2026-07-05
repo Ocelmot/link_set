@@ -8,12 +8,15 @@ use tracing::{Instrument, info, trace, trace_span};
 
 use crate::{
     LinkSetResult,
+    debug::DebugCommand,
     link_set::controller::{LinkSetControl, LinkSetControlConfig, LinkSetMessageInner},
     protocol::LinkProtocol,
     state::{common::CommonState, states::States},
 };
 
-pub(crate) fn start_core() -> (Sender<LinkSetControl>, Receiver<LinkSetMessageInner>) {
+pub(crate) fn start_core(
+    mut debug_channel: Option<Receiver<DebugCommand>>,
+) -> (Sender<LinkSetControl>, Receiver<LinkSetMessageInner>) {
     trace!("LinkSetCore starting");
     let (to_core, mut from_ctrl) = channel(10);
     let (to_ctrl, from_core) = channel(10);
@@ -60,6 +63,10 @@ pub(crate) fn start_core() -> (Sender<LinkSetControl>, Receiver<LinkSetMessageIn
                         state = handle_timer(&mut common, state).await;
                     }
 
+                    // Respond to debug message
+                    cmd = recv_opt(&mut debug_channel) => {
+                        state = handle_debug(&mut common, state, cmd).await;
+                    }
                 }
 
                 if old_state_name != state.get_name() {
@@ -82,11 +89,7 @@ pub(crate) fn start_core() -> (Sender<LinkSetControl>, Receiver<LinkSetMessageIn
 
 /// Takes the current state and LinkSetControl message, dispatches it to the
 /// state and returns the new state
-async fn handle_ctrl_msg(
-    common: &mut CommonState,
-    state: States,
-    msg: LinkSetControl,
-) -> States {
+async fn handle_ctrl_msg(common: &mut CommonState, state: States, msg: LinkSetControl) -> States {
     match msg {
         LinkSetControl::Command(cmd) => {
             let boxed = state.into_boxed_inner();
@@ -128,4 +131,25 @@ async fn handle_link_msg(
 async fn handle_timer(common: &mut CommonState, state: States) -> States {
     let boxed = state.into_boxed_inner();
     boxed.timer(common).await
+}
+
+async fn handle_debug(common: &mut CommonState, state: States, cmd: DebugCommand) -> States {
+    let boxed = state.into_boxed_inner();
+    boxed.debug(common, cmd).await
+}
+
+async fn recv_opt(opt_receiver: &mut Option<Receiver<DebugCommand>>) -> DebugCommand {
+    match opt_receiver {
+        Some(receiver) => {
+            match receiver.recv().await {
+                Some(cmd) => cmd,
+                None => {
+                    *opt_receiver = None;
+                    std::future::pending().await
+                },
+            }
+        },
+        None => std::future::pending().await,
+    }
+
 }

@@ -19,8 +19,26 @@ impl LinkManager {
         Self { links: vec![link] }
     }
 
+    pub fn link_entries(&self) -> impl Iterator<Item = &LinkEntry> {
+        self.links.iter()
+    }
+
     pub fn add_link(&mut self, link: LinkEntry) {
         self.links.insert(0, link)
+    }
+
+    /// Used for debugging, normal use shouldnt need to manually remove links
+    pub fn evict_link(&mut self, id: u64) -> bool {
+        let mut found_link = false;
+        self.links.retain(|e|{
+            if e.id() == id {
+                found_link = true;
+                false
+            } else {
+                true
+            }
+        });
+        found_link
     }
 
     pub fn is_empty(&self) -> bool {

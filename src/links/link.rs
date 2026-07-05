@@ -4,6 +4,11 @@ use std::{future::Future, pin::Pin};
 /// The Link trait encapsulates different ways of connecting two endpoints, so
 /// they can be used with [LinkSet]
 pub trait Link: Send + Sync {
+
+    /// The scheme of this link. This should match the scheme of the listener
+    /// that created it.
+    fn scheme() -> &'static str;
+
     /// Send a [Vec<u8>] to the other side of the network.
     ///
     /// This must be read by the other side with the same chunk boundaries. Ten
@@ -26,19 +31,6 @@ pub trait Link: Send + Sync {
         &mut self,
     ) -> impl Future<Output = Result<Vec<u8>, impl std::error::Error + Send + Sync + 'static>> + Send;
 
-    /// Close this link
-    ///
-    /// This allows the underlying implementation to close and clean up its
-    /// resources. If the link had its reader taken, the reader may or may not
-    /// also close. If this function is not implemented, cleanup will be assumed
-    /// to be done on drop. If this function is called, future calls to
-    /// send/recv should indicate the link is closed.
-    fn close(
-        &mut self,
-    ) -> impl Future<Output = Result<(), impl std::error::Error + Send + Sync + 'static>> + Send
-    {
-        async { LinkSetResult::Ok(()) }
-    }
 
     /// Returns a Receiver of [Vec<u8>]s that will fill with items from the
     /// Link.
@@ -99,6 +91,8 @@ impl<T: LinkReader + Send + Sync> PinnedLinkReader for T {
 /// Link, that pins the returned futures.
 #[allow(dead_code)]
 pub trait PinnedLink: private::LinkSeal + Send + Sync {
+    /// Wrapper around [Link::scheme]
+    fn scheme(&self) -> &'static str;
     /// Wrapper around [Link::send]
     fn send(&mut self, msg: Vec<u8>) -> Pin<Box<dyn Future<Output = LinkSetResult> + '_ + Send>>;
     /// Wrapper around [Link::recv]
@@ -114,6 +108,10 @@ pub trait PinnedLink: private::LinkSeal + Send + Sync {
 
 /// Any implementation of link should be able to be wrapped into a pinned link
 impl<T: Link> PinnedLink for T {
+    fn scheme(&self) -> &'static str {
+        T::scheme()
+    }
+
     fn send(&mut self, msg: Vec<u8>) -> Pin<Box<dyn Future<Output = LinkSetResult> + '_ + Send>> {
         Box::pin(async {
             self.send(msg)

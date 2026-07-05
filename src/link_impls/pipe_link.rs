@@ -19,6 +19,8 @@ use crate::{
     links::link::{Link, LinkReader},
 };
 
+static PIPE_SCHEME: &'static str = "mem_pipe";
+
 /// A PipeLinkBuilder sets the configuration for a pair of [PipeLink]s.
 ///
 /// This allows a pair of connected PipeLinks to be created with additional
@@ -210,6 +212,11 @@ pub enum PipeLinkError {
 }
 
 impl Link for PipeLink {
+
+    fn scheme() -> &'static str {
+        PIPE_SCHEME
+    }
+
     #[allow(refining_impl_trait)]
     async fn send(&mut self, msg: Vec<u8>) -> Result<(), PipeLinkError> {
         let reliability_success = {

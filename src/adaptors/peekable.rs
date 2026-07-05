@@ -33,6 +33,10 @@ impl<L: Link> Peekable<L> {
 }
 
 impl<L: Link> Link for Peekable<L> {
+    fn scheme() -> &'static str {
+        L::scheme()
+    }
+
     async fn send(
         &mut self,
         msg: Vec<u8>,

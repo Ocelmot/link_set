@@ -4,9 +4,11 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::debug;
 
 use crate::{
-    LinkSetError, LinkSetReader, LinkSetResult, core::start_core, epoch::Epoch, links::{
-        Address, Link, connector::{LinkConnector, PinnedLinkConnector}, link::PinnedLink
-    }
+    LinkSetError, LinkSetReader, LinkSetResult, core::start_core, debug::DebugHandle, epoch::Epoch, links::{
+        Address, Link,
+        connector::{LinkConnector, PinnedLinkConnector},
+        link::PinnedLink,
+    },
 };
 
 pub trait LinkSetSendable: std::fmt::Debug + Send + Sync + 'static {
@@ -30,10 +32,10 @@ pub(crate) enum LinkSetControlCommand {
     /// Adds a new connector to the link set for the purposes of reestablishing
     /// a broken connection.
     AddConnector(Box<dyn PinnedLinkConnector>),
-    
+
     /// Adds an address to the link set to use when connecting. The bool
     /// indicates if the address should be used multiple times, or just once
-    AddAddress{addr: Address, reuse: bool},
+    AddAddress { addr: Address, reuse: bool },
     /// Add a new link to the LinkSet (moves the set towards connected)
     AddLink(Box<dyn PinnedLink>),
     /// Send a message across the link set
@@ -41,7 +43,7 @@ pub(crate) enum LinkSetControlCommand {
 }
 
 pub(crate) enum LinkSetControlConfig {
-/// Enables or disables the LinkSet auto reconnect feature
+    /// Enables or disables the LinkSet auto reconnect feature
     AutoConnect(bool),
 
     /// The amount of time the system will wait to establish a new connection
@@ -73,7 +75,7 @@ pub(crate) enum LinkSetMessageInner {
     /// When the LinkSet starts attempting a connection it will emit
     /// AttemptingConnection(true). When it stops it will emit
     /// AttemptingConnection(false).
-    /// 
+    ///
     /// Note that it will emit false even when a connection was successful, not
     /// only when it has timed out. This is useful to the consumer to allow
     /// additional addresses to be passed in to the link set for attempted
@@ -139,13 +141,27 @@ pub struct LinkSet<M: LinkSetSendable> {
 impl<M: LinkSetSendable> LinkSet<M> {
     /// Create a new LinkSet
     pub fn new() -> Self {
-        let (to_core, from_core) = start_core();
+        let (to_core, from_core) = start_core(None);
         Self {
             to_core,
             from_core: Some(from_core),
             state: None,
             _phantom: PhantomData,
         }
+    }
+
+    pub fn new_debug() -> (Self, DebugHandle) {
+        let (debug_tx, debug_rx) = tokio::sync::mpsc::channel(10);
+        let (to_core, from_core) = start_core(Some(debug_rx));
+        (
+            Self {
+                to_core,
+                from_core: Some(from_core),
+                state: None,
+                _phantom: PhantomData,
+            },
+            DebugHandle::new(debug_tx),
+        )
     }
 
     /// Cause the LinkSet to attempt to connect using stored addresses, if any.
@@ -168,9 +184,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// a broken connection.
     pub async fn add_connector<C: LinkConnector>(&self, conn: C) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddConnector(
-                Box::new(conn) as Box<dyn PinnedLinkConnector>
-            )))
+            .send(LinkSetControl::Command(
+                LinkSetControlCommand::AddConnector(Box::new(conn) as Box<dyn PinnedLinkConnector>),
+            ))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -178,7 +194,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// Enables or disables the LinkSet auto reconnect feature
     pub async fn set_auto_connect(&self, reconnect: bool) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Config(LinkSetControlConfig::AutoConnect(reconnect)))
+            .send(LinkSetControl::Config(LinkSetControlConfig::AutoConnect(
+                reconnect,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -187,7 +205,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// connect when establishing a new epoch.
     pub async fn set_connection_timeout(&self, timeout: Option<Duration>) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Config(LinkSetControlConfig::ConnectTimeout(timeout)))
+            .send(LinkSetControl::Config(
+                LinkSetControlConfig::ConnectTimeout(timeout),
+            ))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -196,17 +216,20 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// reconnection with the same epoch
     pub async fn set_reconnection_timeout(&self, timeout: Option<Duration>) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Config(LinkSetControlConfig::ReconnectTimeout(timeout)))
+            .send(LinkSetControl::Config(
+                LinkSetControlConfig::ReconnectTimeout(timeout),
+            ))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
-
 
     /// Sets the grace period timeout, the time the link set will wait for an
     /// incoming connection and still use the same epoch
     pub async fn set_grace_period_timeout(&self, grace_period: Option<Duration>) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Config(LinkSetControlConfig::GracePeriod(grace_period)))
+            .send(LinkSetControl::Config(LinkSetControlConfig::GracePeriod(
+                grace_period,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -214,7 +237,10 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// Adds an address to the link set to use for auto reconnection
     pub async fn add_addr(&self, addr: Address) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress { addr, reuse: true }))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress {
+                addr,
+                reuse: true,
+            }))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -222,20 +248,25 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// Adds an address to the link set to try to use for auto reconnection one time
     pub async fn try_addr(&self, addr: Address) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress  { addr, reuse: false }))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress {
+                addr,
+                reuse: false,
+            }))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Add a new link to the LinkSet
-    pub async fn add_link(&self, link: impl Link + 'static) -> LinkSetResult{
+    pub async fn add_link(&self, link: impl Link + 'static) -> LinkSetResult {
         self.add_link_boxed(Box::new(link)).await
     }
 
     /// Add a new boxed link to the LinkSet
-    pub async fn add_link_boxed(&self, link: Box<dyn PinnedLink>) -> LinkSetResult{
+    pub async fn add_link_boxed(&self, link: Box<dyn PinnedLink>) -> LinkSetResult {
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(link)))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddLink(
+                link,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -246,7 +277,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
             .to_bytes()
             .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, None)))
+            .send(LinkSetControl::Command(LinkSetControlCommand::Message(
+                msg, None,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -258,7 +291,10 @@ impl<M: LinkSetSendable> LinkSet<M> {
             .to_bytes()
             .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, Some(epoch))))
+            .send(LinkSetControl::Command(LinkSetControlCommand::Message(
+                msg,
+                Some(epoch),
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -270,7 +306,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
             .to_bytes()
             .map_err(|e| LinkSetError::SendableSerialization(Box::new(e)))?;
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::Message(msg, epoch)))
+            .send(LinkSetControl::Command(LinkSetControlCommand::Message(
+                msg, epoch,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }

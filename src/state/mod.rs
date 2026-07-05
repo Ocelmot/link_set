@@ -1,6 +1,7 @@
 use std::pin::Pin;
 
 use crate::{
+    debug::DebugCommand,
     link_set::controller::LinkSetControlCommand,
     protocol::LinkProtocol,
     state::{common::CommonState, states::States},
@@ -25,6 +26,12 @@ pub(crate) trait State {
     ) -> impl Future<Output = States> + Send;
 
     fn timer(self: Box<Self>, common: &mut CommonState) -> impl Future<Output = States> + Send;
+
+    fn debug(
+        self: Box<Self>,
+        common: &mut CommonState,
+        cmd: DebugCommand,
+    ) -> impl Future<Output = States> + Send;
 }
 
 pub(crate) trait PinnedState {
@@ -44,6 +51,12 @@ pub(crate) trait PinnedState {
     fn timer<'a>(
         self: Box<Self>,
         common: &'a mut CommonState,
+    ) -> Pin<Box<dyn Future<Output = States> + Send + 'a>>;
+
+    fn debug<'a>(
+        self: Box<Self>,
+        common: &'a mut CommonState,
+        cmd: DebugCommand,
     ) -> Pin<Box<dyn Future<Output = States> + Send + 'a>>;
 }
 
@@ -69,5 +82,13 @@ impl<T: State + Send + 'static> PinnedState for T {
         common: &'a mut CommonState,
     ) -> Pin<Box<dyn Future<Output = States> + Send + 'a>> {
         Box::pin(async move { self.timer(common).await })
+    }
+
+    fn debug<'a>(
+        self: Box<Self>,
+        common: &'a mut CommonState,
+        cmd: DebugCommand
+    ) -> Pin<Box<dyn Future<Output = States> + Send + 'a>> {
+        Box::pin(async move { self.debug(common, cmd).await })
     }
 }

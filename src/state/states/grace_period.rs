@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tracing::{trace, warn};
 
 use crate::{
+    debug::{DebugCommand, DebugReplySnapshot},
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
     links::{Address, connector::PinnedLinkConnector},
@@ -11,7 +12,9 @@ use crate::{
     state::{
         State,
         common::CommonState,
-        states::{connected::Connected, connecting::Connecting, disconnected::Disconnected},
+        states::{
+            States, connected::Connected, connecting::Connecting, disconnected::Disconnected,
+        },
         transition::{StateTransitionFrom, to_state_async, to_state_param_async},
     },
 };
@@ -145,6 +148,29 @@ impl State for GracePeriod {
         } else {
             to_state_async::<Disconnected, _>(self, common).await
         }
+    }
+
+    async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
+        let epoch = self.epoch;
+        let addrs = self.addrs.iter().map(|a| a.0.clone()).collect();
+        let conns = self.conns.iter().map(|c| c.1.scheme()).collect();
+        let states = States::from(self);
+        match cmd {
+            DebugCommand::Snapshot(sender) => {
+                let reply = DebugReplySnapshot {
+                    state_name: states.get_name().to_owned(),
+                    epoch: Some(epoch),
+                    addrs,
+                    connectors: conns,
+                    links: vec![],
+                };
+                let _ = sender.send(reply);
+            }
+            DebugCommand::EvictLink(sender, _id) => {
+                let _ = sender.send(false); // disconnected has no links
+            }
+        }
+        states
     }
 }
 

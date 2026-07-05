@@ -21,6 +21,8 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+static TCP_SCHEME: &'static str = "tcp";
+
 pub type TcpLinkResult<T = ()> = Result<T, TcpLinkError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -198,6 +200,10 @@ impl LinkReader for TcpLinkReader {
 }
 
 impl Link for TcpLink {
+    fn scheme() -> &'static str {
+        TCP_SCHEME
+    }
+
     async fn send(
         &mut self,
         msg: Vec<u8>,

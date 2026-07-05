@@ -5,21 +5,32 @@ use crate::{
     links::link::{Link, PinnedLink},
 };
 
-pub trait LinkConnector: Send + Sync + 'static{
+pub trait LinkConnector: Send + Sync + 'static {
     fn scheme(&self) -> &'static str;
-    fn connect(&mut self, addr: String) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>> + Send;
+    fn connect(
+        &self,
+        addr: String,
+    ) -> impl Future<
+        Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>,
+    > + Send;
 }
 
 // Link connector is implemented for async functions that match its signature
 impl<F: Send + Sync + 'static, Ret, L, E> LinkConnector for (&'static str, F)
 where
-    F: FnMut(String) -> Ret,
+    F: Fn(String) -> Ret,
     Ret: Future<Output = Result<L, E>> + Send + Sync,
     L: Link + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
-    fn scheme(&self) -> &'static str {self.0}
-    fn connect(&mut self, addr: String) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>> {
+    fn scheme(&self) -> &'static str {
+        self.0
+    }
+    fn connect(
+        &self,
+        addr: String,
+    ) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>>
+    {
         self.1(addr)
     }
 }
@@ -28,20 +39,26 @@ where
 pub(crate) trait PinnedLinkConnector: Sync + Send {
     fn scheme(&self) -> &'static str;
     fn connect<'a>(
-        &'a mut self,
+        &'a self,
         addr: String,
-    ) ->  Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>> ;
+    ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>>;
 }
 
 // PinnedLinkConnector is implemented for all LinkConnectors
 impl<LC: LinkConnector> PinnedLinkConnector for LC {
-    fn scheme(&self) -> &'static str {self.scheme()}
+    fn scheme(&self) -> &'static str {
+        self.scheme()
+    }
     fn connect<'a>(
-        &'a mut self,
+        &'a self,
         addr: String,
-    ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>>
+    {
         let x = async {
-            let link = self.connect(addr).await.map_err(|e| crate::LinkSetError::LinkError(Box::new(e)))?;
+            let link = self
+                .connect(addr)
+                .await
+                .map_err(|e| crate::LinkSetError::LinkError(Box::new(e)))?;
             LinkSetResult::Ok(Box::new(link) as Box<dyn PinnedLink>)
         };
         Box::pin(x)
