@@ -1,15 +1,16 @@
-use std::{cmp::Ordering, collections::HashMap, time::Duration};
+use std::{cmp::Ordering, time::Duration};
 
 use tokio::time::Instant;
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 const EPOCH_MISMATCH_TIMER_INTERVAL: Duration = Duration::from_secs(2);
 
 use crate::{
+    connector_manager::{AddressSet, ConnectorSet},
     debug::{DebugCommand, DebugReplySnapshot, LinkDescription},
     epoch::{Epoch, compare_epochs},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, LinkEntry, connector::PinnedLinkConnector, link_manager::LinkManager},
+    links::{LinkEntry, link_manager::LinkManager},
     protocol::LinkProtocol,
     state::{
         State,
@@ -26,9 +27,9 @@ use crate::{
 
 pub(crate) struct EpochMismatch {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: ConnectorSet,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(Address, bool)>,
+    pub(crate) addrs: AddressSet,
 
     pub(crate) links: LinkManager,
     pub(crate) queued_msgs: Vec<Vec<u8>>,
@@ -72,8 +73,12 @@ impl State for EpochMismatch {
 
                 self.into()
             }
-            LinkSetControlCommand::AddAddress { addr, reuse } => {
-                self.addrs.push((addr, reuse));
+            LinkSetControlCommand::AddAddress(addr) => {
+                if let Some(old) = self.addrs.get(&addr) {
+                    old.merge(addr);
+                } else {
+                    self.addrs.insert(addr);
+                }
                 self.into()
             }
             LinkSetControlCommand::AddLink(link) => {
@@ -195,8 +200,8 @@ impl State for EpochMismatch {
                     descriptions
                 };
                 let epoch = self.epoch;
-                let addrs = self.addrs.iter().map(|a|a.0.clone()).collect();
-                let conns = self.conns.iter().map(|c|c.1.scheme()).collect();
+                let addrs = self.addrs.iter().map(|a| a.addr().clone()).collect();
+                let conns = self.conns.iter().map(|c| c.1.scheme()).collect();
                 let states = States::from(self);
                 let reply = DebugReplySnapshot {
                     state_name: states.get_name().to_owned(),
@@ -249,14 +254,7 @@ impl StateTransitionWithParamAsync<Connecting, LinkEntry> for EpochMismatch {
         common: &mut CommonState,
         link: LinkEntry,
     ) -> Box<EpochMismatch> {
-        let (conns, addrs) = match old_state.connector.cancel().await {
-            Ok((conns, addrs)) => (conns, addrs),
-            Err(_) => {
-                error!("Panic occurred in connector manager");
-                // Should probably close down here so it can be handled properly by the user
-                (HashMap::new(), Vec::new())
-            }
-        };
+        let (conns, addrs) = old_state.connector.cancel().await;
 
         let mut links = LinkManager::new();
         links.add_link(link);

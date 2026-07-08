@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{
+    connector_manager::{AddressSet, ConnectorSet},
     debug::{DebugCommand, DebugReplySnapshot},
     epoch::{Epoch, opt_epoch_increment},
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, connector::PinnedLinkConnector},
     protocol::LinkProtocol,
     state::{
         State,
@@ -21,9 +21,9 @@ use crate::{
 
 pub(crate) struct Disconnected {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: ConnectorSet,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(Address, bool)>,
+    pub(crate) addrs: AddressSet,
 
     /// The next allowable epoch (None means any would be ok)
     pub(crate) epoch: Option<Epoch>,
@@ -33,7 +33,7 @@ impl Disconnected {
     pub fn new() -> Self {
         Disconnected {
             conns: HashMap::new(),
-            addrs: Vec::new(),
+            addrs: HashSet::new(),
             epoch: None,
         }
     }
@@ -59,8 +59,12 @@ impl State for Disconnected {
 
                 self.into()
             }
-            LinkSetControlCommand::AddAddress { addr, reuse } => {
-                self.addrs.push((addr, reuse));
+            LinkSetControlCommand::AddAddress(addr) => {
+                if let Some(old) = self.addrs.get(&addr) {
+                    old.merge(addr);
+                } else {
+                    self.addrs.insert(addr);
+                }
                 self.into()
             }
             LinkSetControlCommand::AddLink(link) => match common.wrap_link(link) {
@@ -108,8 +112,8 @@ impl State for Disconnected {
 
     async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
         let epoch = self.epoch;
-        let addrs = self.addrs.iter().map(|a|a.0.clone()).collect();
-        let conns = self.conns.iter().map(|c|c.1.scheme()).collect();
+        let addrs = self.addrs.iter().map(|a| a.addr().clone()).collect();
+        let conns = self.conns.iter().map(|c| c.1.scheme()).collect();
         let states = States::from(self);
         match cmd {
             DebugCommand::Snapshot(sender) => {
@@ -122,7 +126,7 @@ impl State for Disconnected {
                 };
                 let _ = sender.send(reply);
             }
-            DebugCommand::EvictLink(sender, _id ) => {
+            DebugCommand::EvictLink(sender, _id) => {
                 let _ = sender.send(false); // disconnected has no links
             }
         }
@@ -135,14 +139,7 @@ impl StateTransitionFromAsync<Connecting> for Disconnected {
         old_state: Box<Connecting>,
         common: &mut CommonState,
     ) -> Box<Disconnected> {
-        let (conns, addrs) = match old_state.connector.cancel().await {
-            Ok((conns, addrs)) => (conns, addrs),
-            Err(_) => {
-                error!("Panic occurred in connector manager");
-                // Should probably close down here so it can be handled properly by the user
-                (HashMap::new(), Vec::new())
-            }
-        };
+        let (conns, addrs) = old_state.connector.cancel().await;
         common.get_timer().clear();
         let _ = common
             .get_to_ctrl()
@@ -192,14 +189,7 @@ impl StateTransitionFromAsync<Connected> for Disconnected {
 
 impl StateTransitionFromAsync<Reconnecting> for Disconnected {
     async fn transition_from(old_state: Box<Reconnecting>, common: &mut CommonState) -> Box<Self> {
-        let (conns, addrs) = match old_state.connector.cancel().await {
-            Ok((conns, addrs)) => (conns, addrs),
-            Err(_) => {
-                error!("Panic occurred in connector manager");
-                // Should probably close down here so it can be handled properly by the user
-                (HashMap::new(), Vec::new())
-            }
-        };
+        let (conns, addrs) = old_state.connector.cancel().await;
         let _ = common
             .get_to_ctrl()
             .send(LinkSetMessageInner::AttemptingConnection(false))

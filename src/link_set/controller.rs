@@ -1,10 +1,10 @@
-use std::{error::Error, marker::PhantomData, time::Duration};
+use std::{error::Error, marker::PhantomData, sync::Arc, time::Duration};
 
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::debug;
 
 use crate::{
-    LinkSetError, LinkSetReader, LinkSetResult, core::start_core, debug::DebugHandle, epoch::Epoch, links::{
+    LinkSetError, LinkSetReader, LinkSetResult, connector_manager::ConnectorManagerAddress, core::start_core, debug::DebugHandle, epoch::Epoch, links::{
         Address, Link,
         connector::{LinkConnector, PinnedLinkConnector},
         link::PinnedLink,
@@ -31,11 +31,12 @@ pub(crate) enum LinkSetControlCommand {
     Disconnect,
     /// Adds a new connector to the link set for the purposes of reestablishing
     /// a broken connection.
-    AddConnector(Box<dyn PinnedLinkConnector>),
+    AddConnector(Arc<dyn PinnedLinkConnector>),
 
-    /// Adds an address to the link set to use when connecting. The bool
-    /// indicates if the address should be used multiple times, or just once
-    AddAddress { addr: Address, reuse: bool },
+    /// Adds an address to the link set to use when connecting. The
+    /// ConnectorManagerAddress internally holds a number of permits and a
+    /// repeat flag.
+    AddAddress(ConnectorManagerAddress),
     /// Add a new link to the LinkSet (moves the set towards connected)
     AddLink(Box<dyn PinnedLink>),
     /// Send a message across the link set
@@ -185,7 +186,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
     pub async fn add_connector<C: LinkConnector>(&self, conn: C) -> LinkSetResult {
         self.to_core
             .send(LinkSetControl::Command(
-                LinkSetControlCommand::AddConnector(Box::new(conn) as Box<dyn PinnedLinkConnector>),
+                LinkSetControlCommand::AddConnector(Arc::new(conn) as Arc<dyn PinnedLinkConnector>),
             ))
             .await
             .map_err(|_| LinkSetError::Terminated)
@@ -236,22 +237,20 @@ impl<M: LinkSetSendable> LinkSet<M> {
 
     /// Adds an address to the link set to use for auto reconnection
     pub async fn add_addr(&self, addr: Address) -> LinkSetResult {
+        let inner_addr: ConnectorManagerAddress = addr.into();
+        inner_addr.repeat();
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress {
-                addr,
-                reuse: true,
-            }))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress (inner_addr)))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
 
     /// Adds an address to the link set to try to use for auto reconnection one time
     pub async fn try_addr(&self, addr: Address) -> LinkSetResult {
+        let inner_addr: ConnectorManagerAddress = addr.into();
+        inner_addr.add_count(1);
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress {
-                addr,
-                reuse: false,
-            }))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress(inner_addr)))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }

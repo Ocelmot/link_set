@@ -20,11 +20,6 @@ pub struct LinkDescription{
     pub scheme: String,
 }
 
-
-pub(crate) enum ConnectionManagerDebugCommand{
-    Snapshot(oneshot::Sender<ConnectionManagerDebugReplySnapshot>),
-}
-
 pub(crate) struct ConnectionManagerDebugReplySnapshot{
     /// List of Addresses being handled
     pub addrs: Vec<Address>,

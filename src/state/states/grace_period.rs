@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use tracing::{trace, warn};
 
 use crate::{
+    connector_manager::{AddressSet, ConnectorSet},
     debug::{DebugCommand, DebugReplySnapshot},
     epoch::Epoch,
     link_set::controller::{LinkSetControlCommand, LinkSetMessageInner},
-    links::{Address, connector::PinnedLinkConnector},
     message_manager::MessageManager,
     protocol::LinkProtocol,
     state::{
@@ -21,9 +19,9 @@ use crate::{
 
 pub(crate) struct GracePeriod {
     /// Connections available to the connection manager to connect
-    pub(crate) conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
+    pub(crate) conns: ConnectorSet,
     /// Addresses to be copied to the connection manager when time to connect
-    pub(crate) addrs: Vec<(Address, bool)>,
+    pub(crate) addrs: AddressSet,
 
     pub(crate) msg_mgr: MessageManager,
     pub(crate) epoch: Epoch,
@@ -51,8 +49,12 @@ impl State for GracePeriod {
 
                 self.into()
             }
-            LinkSetControlCommand::AddAddress { addr, reuse } => {
-                self.addrs.push((addr, reuse));
+            LinkSetControlCommand::AddAddress(addr) => {
+                if let Some(old) = self.addrs.get(&addr) {
+                    old.merge(addr);
+                } else {
+                    self.addrs.insert(addr);
+                }
                 self.into()
             }
             LinkSetControlCommand::AddLink(link) => match common.wrap_link(link) {
@@ -152,7 +154,7 @@ impl State for GracePeriod {
 
     async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
         let epoch = self.epoch;
-        let addrs = self.addrs.iter().map(|a| a.0.clone()).collect();
+        let addrs = self.addrs.iter().map(|a| a.addr().clone()).collect();
         let conns = self.conns.iter().map(|c| c.1.scheme()).collect();
         let states = States::from(self);
         match cmd {

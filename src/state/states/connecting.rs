@@ -36,12 +36,8 @@ impl State for Connecting {
                 self.connector.add_connector(conn).await;
                 self.into()
             }
-            LinkSetControlCommand::AddAddress { addr, reuse } => {
-                if reuse {
-                    self.connector.add_addr(addr).await;
-                } else {
-                    self.connector.try_addr(addr).await;
-                }
+            LinkSetControlCommand::AddAddress(addr) => {
+                self.connector.add_addr(addr).await;
                 self.into()
             }
             LinkSetControlCommand::AddLink(link) => match common.wrap_link(link) {
@@ -81,12 +77,10 @@ impl State for Connecting {
 
     async fn debug(self: Box<Self>, _common: &mut CommonState, cmd: DebugCommand) -> States {
         let epoch = self.epoch;
-        let (addrs, conns) = self
+        let snapshot = self
             .connector
-            .debug_request_snapshot()
-            .await
-            .map(|snap| (snap.addrs, snap.connectors))
-            .unwrap_or_default();
+            .debug_request_snapshot();
+        let (conns, addrs) = (snapshot.connectors, snapshot.addrs);
         let states = States::from(self);
         match cmd {
             DebugCommand::Snapshot(sender) => {

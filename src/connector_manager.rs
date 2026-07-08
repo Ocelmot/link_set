@@ -1,308 +1,292 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::future::pending;
-use std::ops::ControlFlow::{Break, Continue};
+use std::collections::{HashMap, HashSet};
+
+use std::hash::Hash;
+
+use std::mem;
+use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::Either;
-use futures::pin_mut;
 use tokio::select;
-use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{Receiver, Sender, channel};
-use tokio::sync::oneshot;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::{trace, warn};
+use tracing::debug;
 
-use crate::debug::{ConnectionManagerDebugCommand, ConnectionManagerDebugReplySnapshot};
-use crate::link_set::controller::{LinkSetControl, LinkSetControlCommand};
+use crate::debug::ConnectionManagerDebugReplySnapshot;
+use crate::link_set::controller::LinkSetControl;
+use crate::link_set::controller::LinkSetControlCommand::AddLink;
 use crate::links::Address;
 use crate::links::connector::PinnedLinkConnector;
-use crate::{LinkSetError, LinkSetResult};
 
-enum ConnectorManagerControl {
-    AddAddr(Address),
-    TryAddr(Address),
-    AddConnector(Box<dyn PinnedLinkConnector>),
+pub(crate) const RETRIES_MAX: u16 = 10;
+
+pub(crate) type AddressSet = HashSet<ConnectorManagerAddress>;
+pub(crate) type ConnectorSet = HashMap<String, Arc<dyn PinnedLinkConnector + 'static>>;
+
+pub(crate) struct ConnectorManagerAddress {
+    addr: Address,
+    repeat: watch::Sender<bool>,
+    count: Arc<Semaphore>,
+}
+
+impl ConnectorManagerAddress {
+    pub(crate) fn new(addr: Address) -> Self {
+        Self {
+            addr,
+            repeat: watch::Sender::new(false),
+            count: Arc::new(Semaphore::new(0)),
+        }
+    }
+
+    pub(crate) fn addr(&self) -> &Address {
+        &self.addr
+    }
+
+    pub(crate) fn subscribe_repeat(&self) -> watch::Receiver<bool> {
+        self.repeat.subscribe()
+    }
+
+    pub(crate) fn semaphore(&self) -> Arc<Semaphore> {
+        self.count.clone()
+    }
+
+    pub(crate) fn add_count(&self, count: u16) {
+        let existing = self.count.available_permits();
+        let room = (RETRIES_MAX as usize).saturating_sub(existing);
+        self.count.add_permits(std::cmp::min(count as usize, room));
+    }
+
+    pub(crate) fn repeat(&self) {
+        self.set_repeat(true);
+    }
+
+    pub(crate) fn merge(&self, other: Self) {
+        other.count.close();
+        let other_repeat = other.repeat.send_replace(false);
+
+        let permits = other.count.available_permits();
+        self.add_count(usize::min(permits, u16::MAX as usize) as u16);
+        if other_repeat {
+            self.set_repeat(true);
+        }
+    }
+
+    fn set_repeat(&self, value: bool) {
+        self.repeat.send_if_modified(|v| {
+            if value != *v {
+                *v = value;
+                true
+            } else {
+                false
+            }
+        });
+    }
+}
+
+impl PartialEq for ConnectorManagerAddress {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
+
+impl Eq for ConnectorManagerAddress {}
+
+impl Hash for ConnectorManagerAddress {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addr.hash(state);
+    }
+}
+
+impl From<Address> for ConnectorManagerAddress {
+    fn from(value: Address) -> Self {
+        ConnectorManagerAddress::new(value)
+    }
 }
 
 pub(crate) struct ConnectorManager {
-    tx: Sender<ConnectorManagerControl>,
-    stop_tx: oneshot::Sender<()>,
-    debug_tx: Sender<ConnectionManagerDebugCommand>,
-    handle: JoinHandle<(
-        HashMap<String, Box<dyn PinnedLinkConnector>>,
-        Vec<(Address, bool)>,
-    )>,
+    tx: Sender<LinkSetControl>,
+    conns: ConnectorSet,
+    handles: HashMap<ConnectorManagerAddress, Option<JoinHandle<()>>>,
 }
 
 impl ConnectorManager {
     pub fn start(
-        mut to_core: Sender<LinkSetControl>,
-        // addrs is a list of addresses, and a flag to indicate if they are permanent
-        mut addrs: Vec<(Address, bool)>,
+        tx: Sender<LinkSetControl>,
+        // addrs is a list of addresses containing the count of usages
+        addrs: AddressSet,
         // conns is a list of connectors that can be used
-        mut conns: HashMap<String, Box<dyn PinnedLinkConnector>>,
+        conns: ConnectorSet,
     ) -> Self {
-        let (tx, mut rx) = channel(10);
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let (debug_tx, mut debug_rx) = channel(10);
+        let mut handles = HashMap::new();
+        for addr in addrs {
+            let handle = conns
+                .get(addr.addr().scheme())
+                .map(|conn| create_task(tx.clone(), &addr, &conn));
 
-        let handle = tokio::task::spawn(async move {
-            let mut addr_index = 0;
-            trace!("Connector started");
-            select! {
-                _ = async {
-                    loop {
-                        // process rx
-                        process_rx(&mut rx, &mut conns, &mut addrs, &mut debug_rx).await;
+            handles.insert(addr, handle);
+        }
 
-                        // process for each addr, each conn
-                        process_connecting(
-                            &mut to_core,
-                            &mut conns,
-                            &mut addrs,
-                            &mut addr_index,
-                            &mut debug_rx,
-                        )
-                        .await;
-                    }
-                } => {},
-                _ = stop_rx => {
+        Self { tx, conns, handles }
+    }
 
-                }
-            }
-            (conns, addrs)
-        });
+    pub async fn add_addr(&mut self, addr: ConnectorManagerAddress) {
+        if self.handles.contains_key(&addr) {
+            let (k, _v) = self
+                .handles
+                .get_key_value(&addr)
+                .expect("handles contains_key()");
+            k.merge(addr);
+        } else {
+            let handle = self
+                .conns
+                .get(addr.addr().scheme())
+                .map(|conn| create_task(self.tx.clone(), &addr, &conn));
 
-        Self {
-            tx,
-            stop_tx,
-            debug_tx,
-            handle,
+            self.handles.insert(addr, handle);
         }
     }
 
-    pub async fn add_addr(&self, addr: Address) {
-        let _ = self.tx.send(ConnectorManagerControl::AddAddr(addr)).await;
+    pub async fn add_connector(&mut self, conn: Arc<dyn PinnedLinkConnector>) {
+        if self.conns.contains_key(conn.scheme()) {
+            // Replace the connector in active tasks
+            // First cancel all connectors
+            let iter = self
+                .handles
+                .iter()
+                .filter(|(addr, _)| addr.addr.scheme() == conn.scheme());
+            for (_, handle) in iter {
+                if let Some(handle) = handle {
+                    handle.abort();
+                }
+            }
+
+            // for each connector, await it
+            for (addr, handle) in self
+                .handles
+                .iter_mut()
+                .filter(|(addr, _)| addr.addr.scheme() == conn.scheme())
+            {
+                if let Some(handle) = handle.take() {
+                    let _ = handle.await;
+                }
+
+                // Now there are no tasks for this scheme, it is safe to remake
+                // them with the new connector
+                let new_handle = create_task(self.tx.clone(), &addr, &conn);
+                *handle = Some(new_handle);
+            }
+        } else {
+            // new connector, start new tasks
+            let iter = self
+                .handles
+                .iter_mut()
+                .filter(|(addr, _)| addr.addr.scheme() == conn.scheme());
+
+            for (addr, task) in iter {
+                debug_assert!(task.is_none());
+                *task = Some(create_task(self.tx.clone(), addr, &conn));
+            }
+        }
+        self.conns.insert(conn.scheme().to_owned(), conn);
     }
 
-    pub async fn try_addr(&self, addr: Address) {
-        let _ = self.tx.send(ConnectorManagerControl::TryAddr(addr)).await;
-    }
-
-    pub async fn add_connector(&self, conn: Box<dyn PinnedLinkConnector>) {
-        let _ = self
-            .tx
-            .send(ConnectorManagerControl::AddConnector(conn))
-            .await;
-    }
-
-    pub async fn debug_request_snapshot(
-        &self,
-    ) -> LinkSetResult<ConnectionManagerDebugReplySnapshot> {
-        let (tx, rx) = oneshot::channel();
-        let cmd = ConnectionManagerDebugCommand::Snapshot(tx);
-        self.debug_tx
-            .send(cmd)
-            .await
-            .map_err(|_| LinkSetError::Closed)?;
-        rx.await.map_err(|_| LinkSetError::Closed)
+    pub fn debug_request_snapshot(&self) -> ConnectionManagerDebugReplySnapshot {
+        let addrs = self
+            .handles
+            .iter()
+            .map(|(addr, _)| addr.addr.clone())
+            .collect();
+        let connectors = self.conns.iter().map(|(_, c)| c.scheme()).collect();
+        ConnectionManagerDebugReplySnapshot { addrs, connectors }
     }
 
     pub async fn cancel(
-        self,
-    ) -> LinkSetResult<(
-        HashMap<String, Box<dyn PinnedLinkConnector>>,
-        Vec<(Address, bool)>,
-    )> {
-        drop(self.tx);
-        let _ = self.stop_tx.send(());
-        self.handle
-            .await
-            .map_err(|e| LinkSetError::TaskTerminated(Box::new(e)))
+        mut self,
+    ) -> (
+        ConnectorSet,
+        AddressSet,
+    ) {
+        // First cancel all connectors
+        for (_, handle) in &self.handles {
+            if let Some(handle) = handle {
+                handle.abort();
+            }
+        }
+
+        // Collect the addrs
+        let mut addrs = HashSet::new();
+
+        let handles = mem::take(&mut self.handles);
+        for (addr, mut handle) in handles.into_iter() {
+            if let Some(handle) = handle.take() {
+                let _ = handle.await;
+            }
+
+            addrs.insert(addr);
+        }
+        (mem::take(&mut self.conns), addrs)
     }
 }
 
-impl Debug for ConnectorManagerControl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AddAddr(arg0) => f.debug_tuple("AddAddr").field(arg0).finish(),
-            Self::TryAddr(arg0) => f.debug_tuple("TryAddr").field(arg0).finish(),
-            Self::AddConnector(_) => f.debug_tuple("AddConnector").field(&"<Connector>").finish(),
+impl Drop for ConnectorManager {
+    fn drop(&mut self) {
+        // Normal use shouldn't have any entries to drop. They should be consumed
+        // in cancel(). However, any task that gets through that will live
+        // forever otherwise.
+        for (_, handle) in &self.handles{
+            if let Some(handle) = handle {
+                handle.abort();
+            }
         }
     }
 }
 
-async fn process_rx(
-    rx: &mut Receiver<ConnectorManagerControl>,
-    conns: &mut HashMap<String, Box<dyn PinnedLinkConnector>>,
-    addrs: &mut Vec<(Address, bool)>,
-    debug_rx: &mut Receiver<ConnectionManagerDebugCommand>,
-) {
-    loop {
-        let flow = or_debug(conns, addrs, debug_rx, async {
-            if addrs.len() == 0 || conns.len() == 0 {
-                // wait for rx to have a message and start over
-                trace!(
-                    "Connector waiting for message, addrs: {}, conns: {}",
-                    addrs.len(),
-                    conns.len()
-                );
-                match rx.recv().await {
-                    Some(ctrl) => Continue(Some(ctrl)),
-                    None => Break(()),
-                }
+fn create_task(
+    tx: Sender<LinkSetControl>,
+    addr: &ConnectorManagerAddress,
+    conn: &Arc<dyn PinnedLinkConnector>,
+) -> JoinHandle<()> {
+    let address = addr.addr().addr().to_owned();
+    let scheme = addr.addr().scheme().to_owned();
+    let semaphore = addr.semaphore();
+    let mut repeat = addr.subscribe_repeat();
+    let connector = conn.clone();
+    tokio::spawn(async move {
+        loop {
+            let permit = if *repeat.borrow() {
+                None
             } else {
-                trace!(
-                    "Connector checking for message, addrs: {}, conns: {}",
-                    addrs.len(),
-                    conns.len()
-                );
-                match rx.try_recv() {
-                    Ok(ctrl) => Continue(Some(ctrl)),
-                    Err(TryRecvError::Empty) => Continue(None),
-                    Err(TryRecvError::Disconnected) => Break(()),
-                }
-            }
-        })
-        .await;
-        let Continue(ctrl) = flow else {
-            return;
-        };
-
-        trace!("Got control message: {:?}", ctrl);
-        match ctrl {
-            Some(ConnectorManagerControl::AddAddr(add_addr)) => {
-                let mut contains = false;
-                for (addr, _) in &mut *addrs {
-                    if *addr == add_addr {
-                        // skip addrs we already have in the list
-                        contains = true;
-                        break;
+                select! {
+                    res = semaphore.acquire() => match res {
+                        Ok(permit) => Some(permit),
+                        Err(_) => break, // semaphore closed
+                    },
+                    // When the repeat value changes, evaluate from the start
+                    // where it will detect the change
+                    res = repeat.changed() => match res {
+                        Ok(_) => continue,
+                        Err(_) => break, // sender dropped
                     }
                 }
-                if !contains {
-                    addrs.push((add_addr, true));
-                }
-            }
-            Some(ConnectorManagerControl::TryAddr(try_addr)) => {
-                let mut contains = false;
-                for (addr, _) in &mut *addrs {
-                    if *addr == try_addr {
-                        // skip addrs we already have in the list
-                        contains = true;
-                        break;
-                    }
-                }
-                if !contains {
-                    addrs.push((try_addr, false));
-                }
-            }
-            Some(ConnectorManagerControl::AddConnector(conn)) => {
-                let scheme = conn.scheme();
-                if conns.insert(scheme.to_string(), conn).is_some() {
-                    warn!(
-                        "Connector list already contained connector for scheme `{scheme}`! The connector has been replaced."
-                    );
-                }
-            }
-            None => break,
-        };
-    }
-}
+            };
 
-async fn process_connecting(
-    to_core: &mut Sender<LinkSetControl>,
-    conns: &mut HashMap<String, Box<dyn PinnedLinkConnector>>,
-    addrs: &mut Vec<(Address, bool)>,
-    addr_index: &mut usize,
-    debug_rx: &mut Receiver<ConnectionManagerDebugCommand>,
-) {
-    if let Some((addr, retain_addr)) = addrs.get(*addr_index) {
-        if let Some(conn) = conns.get(addr.scheme()) {
-            let scheme = conn.scheme();
-            trace!("Connector attempting to connect to {addr} with connector scheme {scheme}");
-            let res = or_debug(
-                conns,
-                addrs,
-                debug_rx,
-                conn.connect(addr.addr().to_string()),
-            )
-            .await;
-            match res {
+            match connector.connect(address.clone()).await {
                 Ok(link) => {
-                    trace!("Connector made connection, adding link");
-                    let _ = or_debug(
-                        conns,
-                        addrs,
-                        debug_rx,
-                        to_core.send(LinkSetControl::Command(LinkSetControlCommand::AddLink(
-                            link,
-                        ))),
-                    )
-                    .await;
+                    let result = tx.send(LinkSetControl::Command(AddLink(link))).await;
+                    if result.is_err() {
+                        break;
+                    }
                 }
                 Err(e) => {
-                    // if there is an error, we will just try again later or with another connector
-                    trace!("Connector did not make a connection: {}", e);
+                    debug!("Connector {scheme} failed to connect: {e}");
                 }
             }
 
-            if *retain_addr {
-                *addr_index += 1;
-            } else {
-                addrs.remove(*addr_index);
+            if let Some(permit) = permit {
+                permit.forget();
             }
-        } else {
-            *addr_index += 1;
+            sleep(Duration::from_secs(5)).await;
         }
-    } else {
-        trace!("Address/Connector list finished, sleeping");
-        *addr_index = 0;
-        sleep(Duration::from_secs(5)).await;
-    }
-}
-
-async fn or_debug<F, O>(
-    conns: &HashMap<String, Box<dyn PinnedLinkConnector>>,
-    addrs: &[(Address, bool)],
-    debug_rx: &mut Receiver<ConnectionManagerDebugCommand>,
-    fut: F,
-) -> O
-where
-    F: Future<Output = O>,
-{
-    pin_mut!(fut);
-
-    loop {
-        let debug_fut = async {
-            let res = debug_rx.recv().await;
-            match res {
-                Some(item) => item,
-                None => pending().await,
-            }
-        };
-        pin_mut!(debug_fut);
-
-        let either = futures::future::select(debug_fut, fut).await;
-
-        match either {
-            Either::Left((cmd, partial_fut)) => {
-                fut = partial_fut;
-                match cmd {
-                    ConnectionManagerDebugCommand::Snapshot(sender) => {
-                        let snapshot = ConnectionManagerDebugReplySnapshot {
-                            addrs: addrs.iter().map(|x| x.0.clone()).collect(),
-                            connectors: conns.iter().map(|(_, v)| v.scheme()).collect(),
-                        };
-                        let _ = sender.send(snapshot);
-                    }
-                }
-            }
-            Either::Right((out, _)) => {
-                break out;
-            }
-        }
-    }
+    })
 }
