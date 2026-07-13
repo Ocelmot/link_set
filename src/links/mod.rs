@@ -10,4 +10,4 @@ pub use connector::LinkConnector;
 pub(crate) mod link_manager;
 
 pub(crate) mod address;
-pub use address::Address;
+pub use address::{Address, AddressRepr};

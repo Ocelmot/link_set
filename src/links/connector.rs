@@ -1,15 +1,14 @@
 use std::pin::Pin;
 
 use crate::{
-    LinkSetResult,
-    links::link::{Link, PinnedLink},
+    LinkSetResult, links::{address::AddressRepr, link::{Link, PinnedLink}},
 };
 
 pub trait LinkConnector: Send + Sync + 'static {
     fn scheme(&self) -> &'static str;
     fn connect(
         &self,
-        addr: String,
+        addr: AddressRepr,
     ) -> impl Future<
         Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>,
     > + Send;
@@ -18,7 +17,7 @@ pub trait LinkConnector: Send + Sync + 'static {
 // Link connector is implemented for async functions that match its signature
 impl<F: Send + Sync + 'static, Ret, L, E> LinkConnector for (&'static str, F)
 where
-    F: Fn(String) -> Ret,
+    F: Fn(AddressRepr) -> Ret,
     Ret: Future<Output = Result<L, E>> + Send + Sync,
     L: Link + 'static,
     E: std::error::Error + Send + Sync + 'static,
@@ -28,7 +27,7 @@ where
     }
     fn connect(
         &self,
-        addr: String,
+        addr: AddressRepr,
     ) -> impl Future<Output = Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static>>
     {
         self.1(addr)
@@ -40,7 +39,7 @@ pub(crate) trait PinnedLinkConnector: Sync + Send {
     fn scheme(&self) -> &'static str;
     fn connect<'a>(
         &'a self,
-        addr: String,
+        addr: AddressRepr,
     ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>>;
 }
 
@@ -51,7 +50,7 @@ impl<LC: LinkConnector> PinnedLinkConnector for LC {
     }
     fn connect<'a>(
         &'a self,
-        addr: String,
+        addr: AddressRepr,
     ) -> Pin<Box<dyn Future<Output = LinkSetResult<Box<dyn PinnedLink + 'static>>> + Send + 'a>>
     {
         let x = async {

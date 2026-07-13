@@ -20,7 +20,7 @@ rand = "0.8.5"
 
 serde = {version = "1.0.228", optional = true}
 bincode = {version = "2.0.1", optional = true, features = ["serde"]}
-
+base64 = "0.22.1"
 
 [dev-dependencies]
 link_set = { path = ".", features = ["pipe_link"] }

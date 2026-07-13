@@ -7,6 +7,9 @@ pub type LinkSetResult<T = ()> = Result<T, LinkSetError>;
 
 #[derive(Error, Debug)]
 pub enum LinkSetError {
+    #[error("incorrect address type: expected: {expected}, found {found}")]
+    IncorrectAddrType{expected: String, found: String},
+
     #[error("deserialize: unexpected end of stream")]
     DeserializeEOF,
     #[error("deserialize: found invalid byte {0}")]

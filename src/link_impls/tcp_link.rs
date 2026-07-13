@@ -1,15 +1,11 @@
 use std::{
-    collections::VecDeque,
-    io::{Read, Write},
-    mem,
-    sync::{
+    collections::VecDeque, io::{Read, Write}, mem, net::{Ipv4Addr, Ipv6Addr, SocketAddr::{self, V4, V6}, SocketAddrV4, SocketAddrV6}, sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
+    }, time::Duration,
 };
 
-use crate::links::{Link, LinkReader};
+use crate::links::{AddressRepr, Link, LinkReader};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ErrorKind},
@@ -33,8 +29,33 @@ pub enum TcpLinkError {
     #[error("The receiver has already been taken")]
     ReceiverTaken,
 
+    #[error("Invalid Address format")]
+    InvalidAddr,
+
     #[error("The link has closed")]
     Closed,
+}
+
+
+impl From<SocketAddr> for AddressRepr {
+    fn from(value: SocketAddr) -> Self {
+        let bytes = match value {
+            V4(addr) => {
+                let mut bytes = Vec::with_capacity(6);
+                bytes.extend_from_slice(&(addr.ip()).octets());
+                bytes.extend_from_slice(&addr.port().to_be_bytes());
+                bytes
+            },
+            V6(addr) => {
+                let mut bytes = Vec::with_capacity(18);
+                bytes.extend_from_slice(&(addr.ip()).octets());
+                bytes.extend_from_slice(&addr.port().to_be_bytes());
+                bytes
+            }
+        };
+
+        AddressRepr::Bytes(bytes)
+    }
 }
 
 /// An implementation of [Link] that uses TCP as its underlying transport
@@ -93,6 +114,33 @@ impl TcpLink {
             TcpLinkResult::Ok(())
         });
         Ok(rx)
+    }
+
+    pub async fn connect_address(addr: AddressRepr) -> TcpLinkResult<Self> {
+        match addr {
+            AddressRepr::String(addr) => TcpLink::connect(addr).await,
+            AddressRepr::Bytes(bytes) => {
+                let sockaddr = match bytes.len() {
+                    6 => {
+                        let ip: &[u8; 4] = bytes[0..4].try_into().unwrap();
+                        let port = u16::from_be_bytes(bytes[4..6].try_into().unwrap());
+
+                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from_octets(*ip), port))
+                    },
+                    18 => {
+                        let ip: &[u8; 16] = bytes[0..16].try_into().unwrap();
+                        let port = u16::from_be_bytes(bytes[16..18].try_into().unwrap());
+
+                        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_octets(*ip), port, 0, 0))
+                    }
+                    _ => {
+                        return Err(TcpLinkError::InvalidAddr);
+                    }
+                };
+
+                TcpLink::connect(sockaddr).await
+            },
+        }
     }
 
     /// Establishes a connection to a process that has called [TcpLink::listen].

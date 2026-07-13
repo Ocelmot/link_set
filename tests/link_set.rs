@@ -13,9 +13,7 @@ use std::time::Duration;
 ///  - Test that high latency connections are removed
 ///  - Test that messages are resent when parts are dropped
 use link_set::{
-    LinkSet, LinkSetMessage, LinkSetSendable,
-    links::Address,
-    link_impls::{PipeLinkBuilder, PipeLinkHub},
+    LinkSet, LinkSetMessage, LinkSetSendable, link_impls::{PipeLinkBuilder, PipeLinkHub}, links::{Address, AddressRepr},
 };
 use tokio::time::sleep;
 use tracing::trace;
@@ -66,10 +64,10 @@ async fn create_default_config(
     if enable_a_connector {
         let hub1 = hub.clone();
         link_set1
-            .add_connector(("pipe", move |addr: String| {
+            .add_connector(("pipe", move |addr: AddressRepr| {
                 trace!("Link a is connecting");
                 let mut hub_clone = hub1.clone();
-                async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
+                async move { hub_clone.connect(addr.addr_string()?).ok_or(link_set::LinkSetError::Closed) }
             }))
             .await
             .expect("link should stay alive long enough to add the connector");
@@ -93,10 +91,10 @@ async fn create_default_config(
     if enable_b_connector {
         let hub2 = hub.clone();
         link_set2
-            .add_connector(("pipe", move |addr: String| {
+            .add_connector(("pipe", move |addr: AddressRepr| {
                 trace!("Link b is connecting");
                 let mut hub_clone = hub2.clone();
-                async move { hub_clone.connect(&addr).ok_or(link_set::LinkSetError::Closed) }
+                async move { hub_clone.connect(addr.addr_string()?).ok_or(link_set::LinkSetError::Closed) }
             }))
             .await
             .expect("link should stay alive long enough to add the connector");
