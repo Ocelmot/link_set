@@ -1,3 +1,5 @@
+use std::sync::{Arc, atomic::AtomicBool};
+
 use futures::StreamExt;
 use rand::random;
 use tokio::{
@@ -16,6 +18,7 @@ use crate::{
 
 pub(crate) fn start_core(
     mut debug_channel: Option<Receiver<DebugCommand>>,
+    is_active: Arc<AtomicBool>
 ) -> (Sender<LinkSetControl>, Receiver<LinkSetMessageInner>) {
     trace!("LinkSetCore starting");
     let (to_core, mut from_ctrl) = channel(10);
@@ -23,7 +26,7 @@ pub(crate) fn start_core(
 
     // init
     let span = trace_span!("LinkSet", ID = random::<u16>());
-    let mut common = CommonState::new(to_core.clone(), to_ctrl);
+    let mut common = CommonState::new(to_core.clone(), to_ctrl, is_active);
     let mut state = States::new();
 
     // start loop

@@ -289,7 +289,9 @@ impl StateTransitionFromAsync<Connected> for EpochMismatch {
         common
             .get_timer()
             .modify_repeat(EPOCH_MISMATCH_TIMER_INTERVAL);
-
+        common
+            .is_active()
+            .store(false, std::sync::atomic::Ordering::Release);
         Box::new(EpochMismatch {
             conns: old_state.conns,
             addrs: old_state.addrs,

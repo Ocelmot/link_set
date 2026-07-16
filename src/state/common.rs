@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::{Arc, atomic::AtomicBool}, time::Duration};
 
 use futures::stream::SelectAll;
 use tokio::sync::mpsc::Sender;
@@ -18,6 +18,7 @@ pub(crate) struct CommonState {
 
     next_link_id: u64,
     readers: SelectAll<ReceiverStream<(u64, LinkProtocol)>>,
+    is_active: Arc<AtomicBool>,
 
     /// Timer for states
     timer: Deadline,
@@ -42,6 +43,7 @@ impl CommonState {
     pub(crate) fn new(
         to_core: Sender<LinkSetControl>,
         to_ctrl: Sender<LinkSetMessageInner>,
+        is_active: Arc<AtomicBool>,
     ) -> Self {
         Self {
             to_core,
@@ -49,6 +51,7 @@ impl CommonState {
 
             next_link_id: 0,
             readers: SelectAll::new(),
+            is_active,
 
             timer: Deadline::new(),
 
@@ -72,6 +75,10 @@ impl CommonState {
         &mut self,
     ) -> &mut SelectAll<ReceiverStream<(u64, LinkProtocol)>> {
         &mut self.readers
+    }
+
+    pub(crate) fn is_active(&self) -> &Arc<AtomicBool> {
+        &self.is_active
     }
 
     pub(crate) fn get_timer(&mut self) -> &mut Deadline {

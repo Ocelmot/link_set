@@ -1,10 +1,23 @@
-use std::{error::Error, marker::PhantomData, sync::Arc, time::Duration};
+use std::{
+    error::Error,
+    marker::PhantomData,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::debug;
 
 use crate::{
-    LinkSetError, LinkSetReader, LinkSetResult, connector_manager::ConnectorManagerAddress, core::start_core, debug::DebugHandle, epoch::Epoch, links::{
+    LinkSetError, LinkSetReader, LinkSetResult,
+    connector_manager::ConnectorManagerAddress,
+    core::start_core,
+    debug::DebugHandle,
+    epoch::Epoch,
+    links::{
         Address, Link,
         connector::{LinkConnector, PinnedLinkConnector},
         link::PinnedLink,
@@ -135,34 +148,73 @@ impl<M: LinkSetSendable> TryFrom<LinkSetMessageInner> for LinkSetMessage<M> {
 pub struct LinkSet<M: LinkSetSendable> {
     to_core: Sender<LinkSetControl>,
     from_core: Option<Receiver<LinkSetMessageInner>>,
-    state: Option<Epoch>,
+    epoch: Arc<Mutex<Option<Epoch>>>,
+    is_active: Arc<AtomicBool>,
     _phantom: PhantomData<M>,
 }
 
 impl<M: LinkSetSendable> LinkSet<M> {
     /// Create a new LinkSet
     pub fn new() -> Self {
-        let (to_core, from_core) = start_core(None);
+        let is_active = Arc::new(AtomicBool::new(false));
+        let (to_core, from_core) = start_core(None, is_active.clone());
         Self {
             to_core,
             from_core: Some(from_core),
-            state: None,
+            epoch: Arc::new(Mutex::new(None)),
+            is_active,
             _phantom: PhantomData,
         }
     }
 
     pub fn new_debug() -> (Self, DebugHandle) {
+        let is_active = Arc::new(AtomicBool::new(false));
         let (debug_tx, debug_rx) = tokio::sync::mpsc::channel(10);
-        let (to_core, from_core) = start_core(Some(debug_rx));
+        let (to_core, from_core) = start_core(Some(debug_rx), is_active.clone());
         (
             Self {
                 to_core,
                 from_core: Some(from_core),
-                state: None,
+                epoch: Arc::new(Mutex::new(None)),
+                is_active,
                 _phantom: PhantomData,
             },
             DebugHandle::new(debug_tx),
         )
+    }
+
+    /// Indicates that the link set has terminated and will no longer send or
+    /// receive messages
+    pub fn is_terminated(&self) -> bool {
+        self.to_core.is_closed()
+    }
+
+    /// Reflects the epoch of the most recently received message.
+    pub fn current_epoch(&self) -> Option<Epoch> {
+        match self.epoch.lock() {
+            Ok(lock) => {
+                // if the reader is taken, rely only on the mutex. If not, then
+                // indicate the epoch is finished if the channel is closed and
+                // empty
+                if self
+                    .from_core
+                    .as_ref()
+                    .is_some_and(|c| c.is_closed() && c.is_empty())
+                {
+                    None
+                } else {
+                    lock.clone()
+                }
+            }
+            // Should never happen, lock is held for very little time, and there
+            // are no panic points while it is held.
+            Err(_) => None,
+        }
+    }
+
+    /// Is the link set currently actively engaged with its peer?
+    pub fn is_active(&self) -> bool {
+        self.is_active.load(Ordering::Acquire) && !self.is_terminated()
     }
 
     /// Cause the LinkSet to attempt to connect using stored addresses, if any.
@@ -240,7 +292,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
         let inner_addr: ConnectorManagerAddress = addr.into();
         inner_addr.repeat();
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress (inner_addr)))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress(
+                inner_addr,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -250,7 +304,9 @@ impl<M: LinkSetSendable> LinkSet<M> {
         let inner_addr: ConnectorManagerAddress = addr.into();
         inner_addr.add_count(1);
         self.to_core
-            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress(inner_addr)))
+            .send(LinkSetControl::Command(LinkSetControlCommand::AddAddress(
+                inner_addr,
+            )))
             .await
             .map_err(|_| LinkSetError::Terminated)
     }
@@ -324,10 +380,12 @@ impl<M: LinkSetSendable> LinkSet<M> {
             .try_into()?;
 
         if let LinkSetMessage::Connected(epoch) = &ret {
-            self.state = Some(*epoch);
+            let mut mutex = self.epoch.lock().unwrap_or_else(|l| l.into_inner());
+            *mutex = Some(*epoch);
         }
         if let LinkSetMessage::Disconnected = &ret {
-            self.state = None;
+            let mut mutex = self.epoch.lock().unwrap_or_else(|l| l.into_inner());
+            *mutex = None;
         }
         debug!("LinkSet emitted: {:?}", ret);
         Ok(ret)
@@ -336,7 +394,7 @@ impl<M: LinkSetSendable> LinkSet<M> {
     /// Takes the receiver part of this LinkSet
     pub fn take_recv(&mut self) -> Option<LinkSetReader<M>> {
         let reader = self.from_core.take()?;
-        let epoch = self.state.take();
+        let epoch = self.epoch.clone();
         Some(LinkSetReader::<M>::new(reader, epoch))
     }
 
@@ -345,7 +403,8 @@ impl<M: LinkSetSendable> LinkSet<M> {
         Self {
             to_core: self.to_core.clone(),
             from_core: None,
-            state: None,
+            epoch: self.epoch.clone(),
+            is_active: self.is_active.clone(),
             _phantom: PhantomData,
         }
     }
@@ -359,17 +418,15 @@ impl<M: LinkSetSendable> Default for LinkSet<M> {
 
 impl<M: LinkSetSendable> ::core::fmt::Debug for LinkSet<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = if self.from_core.is_some() {
-            // has recv
-            match self.state {
-                Some(epoch) => format!("Connected(epoch={})", epoch),
-                None => String::from("Disconnected"),
-            }
-        } else {
-            // recv was taken
-            String::from("Taken")
-        };
 
-        write!(f, "LinkSet {{ status: {} }}", state)
+        let mut state = match self.current_epoch() {
+            Some(epoch) => format!("Connected(epoch={})", epoch),
+            None => String::from("Disconnected"),
+        };
+        if self.epoch.is_poisoned() {
+            state = String::from("Poisoned!!");
+        }
+
+        write!(f, "LinkSet {{ epoch: {} }}", state)
     }
 }

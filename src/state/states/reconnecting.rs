@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use tracing::trace;
 
 use crate::{
@@ -179,6 +181,7 @@ impl StateTransitionFromAsync<Connected> for Reconnecting {
             old_state.addrs,
             old_state.conns,
         );
+        common.is_active().store(false, Ordering::Release);
         Box::new(Reconnecting {
             connector,
             msg_mgr: old_state.msg_mgr,

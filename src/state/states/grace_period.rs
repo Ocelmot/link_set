@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use tracing::{trace, warn};
 
 use crate::{
@@ -183,6 +185,7 @@ impl StateTransitionFrom<Connected> for GracePeriod {
         } else {
             common.get_timer().clear();
         }
+        common.is_active().store(false, Ordering::Release);
 
         Box::new(GracePeriod {
             conns: old_state.conns,

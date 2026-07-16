@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use tokio::time::Instant;
 use tracing::{trace, warn};
@@ -274,6 +274,7 @@ impl StateTransitionWithParamAsync<EpochMismatch, Epoch> for Connected {
 
         common.get_timer().clear();
         common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
+        common.is_active().store(true, Ordering::Release);
         Box::new(Self {
             conns: old_state.conns,
             addrs: old_state.addrs,
@@ -304,6 +305,7 @@ impl StateTransitionWithParamAsync<Reconnecting, LinkEntry> for Connected {
 
         common.get_timer().clear();
         common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
+        common.is_active().store(true, Ordering::Release);
         Box::new(Self {
             conns,
             addrs,
@@ -326,6 +328,7 @@ impl StateTransitionWithParamAsync<GracePeriod, LinkEntry> for Connected {
 
         common.get_timer().clear();
         common.get_timer().modify_repeat(CONNECTED_TIMER_INTERVAL);
+        common.is_active().store(true, Ordering::Release);
         Box::new(Self {
             conns: old_state.conns,
             addrs: old_state.addrs,

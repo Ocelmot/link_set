@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use tracing::trace;
 
 use crate::{
@@ -177,6 +179,7 @@ impl StateTransitionFromAsync<Connected> for Connecting {
         determine_timer(common);
 
         let to_core = common.get_to_core().clone();
+        common.is_active().store(false, Ordering::Release);
         Box::new(Connecting {
             connector: ConnectorManager::start(to_core, old_state.addrs, old_state.conns),
             queued_msgs: Vec::new(),

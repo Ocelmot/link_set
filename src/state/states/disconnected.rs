@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, sync::atomic::Ordering};
 
 use tracing::{trace, warn};
 
@@ -179,6 +179,7 @@ impl StateTransitionFromAsync<Connected> for Disconnected {
             .send(LinkSetMessageInner::Disconnected)
             .await;
         common.get_timer().clear();
+        common.is_active().store(false, Ordering::Release);
         Box::new(Disconnected {
             conns: old_state.conns,
             addrs: old_state.addrs,
