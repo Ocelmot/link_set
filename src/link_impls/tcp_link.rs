@@ -58,6 +58,35 @@ impl From<SocketAddr> for AddressRepr {
     }
 }
 
+impl TryFrom<&AddressRepr> for SocketAddr {
+    type Error = TcpLinkError;
+
+    fn try_from(value: &AddressRepr) -> Result<Self, Self::Error> {
+        match value {
+            AddressRepr::String(addr) => addr.parse().map_err(|_|TcpLinkError::InvalidAddr),
+            AddressRepr::Bytes(bytes) => {
+                Ok(match bytes.len() {
+                    6 => {
+                        let ip: &[u8; 4] = bytes[0..4].try_into().unwrap();
+                        let port = u16::from_be_bytes(bytes[4..6].try_into().unwrap());
+
+                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from_octets(*ip), port))
+                    },
+                    18 => {
+                        let ip: &[u8; 16] = bytes[0..16].try_into().unwrap();
+                        let port = u16::from_be_bytes(bytes[16..18].try_into().unwrap());
+
+                        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_octets(*ip), port, 0, 0))
+                    }
+                    _ => {
+                        return Err(TcpLinkError::InvalidAddr);
+                    }
+                })
+            },
+        }
+    }
+}
+
 /// An implementation of [Link] that uses TCP as its underlying transport
 /// mechanism.
 pub struct TcpLink {
@@ -117,28 +146,10 @@ impl TcpLink {
     }
 
     pub async fn connect_address(addr: AddressRepr) -> TcpLinkResult<Self> {
-        match addr {
+        match &addr {
             AddressRepr::String(addr) => TcpLink::connect(addr).await,
-            AddressRepr::Bytes(bytes) => {
-                let sockaddr = match bytes.len() {
-                    6 => {
-                        let ip: &[u8; 4] = bytes[0..4].try_into().unwrap();
-                        let port = u16::from_be_bytes(bytes[4..6].try_into().unwrap());
-
-                        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from_octets(*ip), port))
-                    },
-                    18 => {
-                        let ip: &[u8; 16] = bytes[0..16].try_into().unwrap();
-                        let port = u16::from_be_bytes(bytes[16..18].try_into().unwrap());
-
-                        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from_octets(*ip), port, 0, 0))
-                    }
-                    _ => {
-                        return Err(TcpLinkError::InvalidAddr);
-                    }
-                };
-
-                TcpLink::connect(sockaddr).await
+            AddressRepr::Bytes(_) => {
+                TcpLink::connect(SocketAddr::try_from(&addr)?).await
             },
         }
     }
